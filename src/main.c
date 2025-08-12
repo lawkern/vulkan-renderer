@@ -60,5 +60,27 @@ int main(void)
       printf("Device Name: %s\n", Properties.deviceName);
    }
 
+   u32 Queue_Family_Property_Count;
+   vkGetPhysicalDeviceQueueFamilyProperties(Physical_Device, &Queue_Family_Property_Count, 0);
+   printf("Queue Family Count: %d\n", Queue_Family_Property_Count);
+
+   VkQueueFamilyProperties Queue_Properties;
+   vkGetPhysicalDeviceQueueFamilyProperties(Physical_Device, &Queue_Family_Property_Count, &Queue_Properties);
+
+   Assert(Queue_Properties.queueFlags & VK_QUEUE_GRAPHICS_BIT);
+
+   VkDeviceQueueCreateInfo Queue_Create_Info = {0};
+   Queue_Create_Info.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+   Queue_Create_Info.queueFamilyIndex = 0;
+   Queue_Create_Info.queueCount = 1;
+
+   VkDeviceCreateInfo Device_Create_Info = {0};
+   Device_Create_Info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+   Device_Create_Info.queueCreateInfoCount = 1;
+   Device_Create_Info.pQueueCreateInfos = &Queue_Create_Info;
+
+   VkDevice Device;
+   VK_CHECK(vkCreateDevice(Physical_Device, &Device_Create_Info, 0, &Device));
+
    return(0);
 }
