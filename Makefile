@@ -18,6 +18,9 @@ compile:
 	eval $(WL_SCANNER) client-header $(WL_PROTOCOLS)/$(WL_DECORATION_PATH) src/external/xdg-decoration-unstable-v1-client-protocol.h
 	eval $(WL_SCANNER) private-code  $(WL_PROTOCOLS)/$(WL_DECORATION_PATH) src/external/xdg-decoration-unstable-v1-protocol.c
 
+	glslc shaders/basic.vert -o basic_vertex.spv
+	glslc shaders/basic.frag -o basic_fragment.spv
+
 	$(CC) -o vulkan_renderer_wayland src/main_wayland.c $(CFLAGS) $(LDLIBS) $(WL_CLIENT)
 
 debug:

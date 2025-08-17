@@ -17,6 +17,13 @@ typedef struct {
    VkImage *Swapchain_Images;
    VkImageView *Swapchain_Image_Views;
 
+   VkShaderModule Vertex_Shader;
+   VkShaderModule Fragment_Shader;
+
+   VkRenderPass Render_Pass;
+   VkPipelineLayout Pipeline_Layout;
+   VkPipeline Graphics_Pipeline;
+
    VkQueue Compute_Queue;
    VkQueue Graphics_Queue;
    VkQueue Present_Queue;

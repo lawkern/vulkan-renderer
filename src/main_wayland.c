@@ -44,8 +44,63 @@ typedef struct {
 } wayland_context;
 
 #include "shared.h"
+#include "platform.h"
 #include "vulkan_renderer.h"
 #include "vulkan_renderer.c"
+
+static READ_ENTIRE_FILE(Read_Entire_File)
+{
+   platform_file Result = {0};
+
+   struct stat File_Information;
+   if(stat(Path, &File_Information) == 0)
+   {
+      int File = open(Path, O_RDONLY);
+      if(File != -1)
+      {
+         size Total_Size = File_Information.st_size;
+         Result.Memory = mmap(0, Total_Size+1, PROT_READ|PROT_WRITE, MAP_ANONYMOUS|MAP_PRIVATE, -1, 0);
+         if(Result.Memory)
+         {
+            while(Result.Size < Total_Size)
+            {
+               size Single_Read = read(File, Result.Memory+Result.Size, Total_Size-Result.Size);
+               if(Single_Read == 0)
+               {
+                  break; // Done.
+               }
+               else if(Single_Read == -1)
+               {
+                  fprintf(stderr, "Failed to read file %s.\n", Path);
+                  break;
+               }
+               else
+               {
+                  Result.Size += Single_Read;
+               }
+            }
+            Assert(Result.Size == Total_Size);
+
+            // NOTE: Null terminate.
+            Result.Memory[Result.Size] = 0;
+         }
+         else
+         {
+            fprintf(stderr, "Failed to allocate file %s.\n", Path);
+         }
+      }
+      else
+      {
+         fprintf(stderr, "Failed to open file %s.\n", Path);
+      }
+   }
+   else
+   {
+      fprintf(stderr, "Failed to determine size of file %s.\n", Path);
+   }
+
+   return(Result);
+}
 
 // NOTE: Configure the global registry and its callbacks.
 static void Global_Registry(void *Data, struct wl_registry *Registry, u32 ID, const char *Interface, u32 Version)

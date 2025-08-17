@@ -1,3 +1,4 @@
 *-protocol.h
 *-protocol.c
 vulkan_renderer_*
+*.spv
