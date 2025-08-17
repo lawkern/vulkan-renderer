@@ -27,6 +27,12 @@ typedef ptrdiff_t size;
 #include <stdlib.h>
 #include <string.h>
 
+static inline bool Strings_Are_Equal(const char *A, const char *B)
+{
+   bool Result = (strcmp(A, B) == 0);
+   return(Result);
+}
+
 typedef struct {
    u8 *Base;
    size Size;
