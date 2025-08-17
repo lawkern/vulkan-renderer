@@ -337,7 +337,7 @@ int main(void)
    Initialize_Wayland(&Wayland, 640, 480);
 
    vulkan_context VK = {0};
-   Initialize_Vulkan(&VK, &Wayland);
+   Initialize_Vulkan(&VK, 640, 480, &Wayland);
 
    while(Wayland.Running)
    {

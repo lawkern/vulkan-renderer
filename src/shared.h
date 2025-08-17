@@ -3,6 +3,8 @@
 // NOTE: Anything not specific to Vulkan should be defined here.
 
 #define Array_Count(Array) (size)(sizeof(Array) / sizeof((Array)[0]))
+#define Minimum(A, B) ((A) < (B) ? (A) : (B))
+#define Maximum(A, B) ((A) > (B) ? (A) : (B))
 
 #define Assert(Cond) do { if(!(Cond)) { __builtin_trap(); } } while(0)
 #define Invalid_Code_Path Assert(0)

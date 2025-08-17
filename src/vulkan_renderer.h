@@ -9,13 +9,21 @@ typedef struct {
    VkSurfaceKHR Surface;
    VkDevice Device;
 
+   VkSwapchainKHR Swapchain;
+   VkExtent2D Swapchain_Extent;
+   VkFormat Swapchain_Image_Format;
+
+   u32 Swapchain_Image_Count;
+   VkImage *Swapchain_Images;
+   VkImageView *Swapchain_Image_Views;
+
    VkQueue Compute_Queue;
    VkQueue Graphics_Queue;
    VkQueue Present_Queue;
 } vulkan_context;
 
 // TODO: Remove Wayland-specific parameters.
-#define INITIALIZE_VULKAN(Name) void Name(vulkan_context *VK, void *Platform_Context)
+#define INITIALIZE_VULKAN(Name) void Name(vulkan_context *VK, int Width, int Height, void *Platform_Context)
 static INITIALIZE_VULKAN(Initialize_Vulkan);
 
 #define RENDER_WITH_VULKAN(Name) void Name(vulkan_context *VK)
