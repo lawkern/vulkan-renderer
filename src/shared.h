@@ -26,6 +26,11 @@ typedef uint64_t u64;
 #include <stddef.h>
 typedef ptrdiff_t size;
 
+typedef struct {
+   size Length;
+   u8 *Data;
+} string;
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -50,6 +55,11 @@ static inline arena Make_Arena(size Size)
    Assert(Result.Base);
 
    return(Result);
+}
+
+static inline void Reset_Arena(arena *Arena)
+{
+   Arena->Used = 0;
 }
 
 // TODO: Alignment!

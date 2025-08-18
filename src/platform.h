@@ -2,10 +2,8 @@
 
 // NOTE: Platform API.
 
-typedef struct {
-   size Size;
-   u8 *Memory;
-} platform_file;
-
-#define READ_ENTIRE_FILE(Name) platform_file Name(char *Path)
+#define READ_ENTIRE_FILE(Name) string Name(char *Path)
 static READ_ENTIRE_FILE(Read_Entire_File);
+
+#define GET_WINDOW_DIMENSIONS(Name) void Name(void *Platform_Context, int *Width, int *Height)
+static GET_WINDOW_DIMENSIONS(Get_Window_Dimensions);

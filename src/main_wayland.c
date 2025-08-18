@@ -7,6 +7,9 @@
 #define VK_USE_PLATFORM_WAYLAND_KHR
 #include <vulkan/vulkan.h>
 
+#define DEFAULT_RESOLUTION_WIDTH 640
+#define DEFAULT_RESOLUTION_HEIGHT 480
+
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -22,6 +25,10 @@
 #include "external/xdg-decoration-unstable-v1-client-protocol.h"
 #include "external/xdg-decoration-unstable-v1-protocol.c"
 
+#include "shared.h"
+#include "platform.h"
+#include "vulkan_renderer.h"
+
 typedef struct {
    struct wl_display *Display;
    struct wl_compositor *Compositor;
@@ -36,21 +43,22 @@ typedef struct {
 
    int Window_Width;
    int Window_Height;
+   int Previous_Window_Width;
+   int Previous_Window_Height;
    bool Running;
    bool Alt_Pressed;
 
    struct zxdg_decoration_manager_v1 *Decoration_Manager;
    struct zxdg_toplevel_decoration_v1 *Toplevel_Decoration;
+
+   vulkan_context VK;
 } wayland_context;
 
-#include "shared.h"
-#include "platform.h"
-#include "vulkan_renderer.h"
 #include "vulkan_renderer.c"
 
 static READ_ENTIRE_FILE(Read_Entire_File)
 {
-   platform_file Result = {0};
+   string Result = {0};
 
    struct stat File_Information;
    if(stat(Path, &File_Information) == 0)
@@ -59,12 +67,12 @@ static READ_ENTIRE_FILE(Read_Entire_File)
       if(File != -1)
       {
          size Total_Size = File_Information.st_size;
-         Result.Memory = mmap(0, Total_Size+1, PROT_READ|PROT_WRITE, MAP_ANONYMOUS|MAP_PRIVATE, -1, 0);
-         if(Result.Memory)
+         Result.Data = mmap(0, Total_Size+1, PROT_READ|PROT_WRITE, MAP_ANONYMOUS|MAP_PRIVATE, -1, 0);
+         if(Result.Data)
          {
-            while(Result.Size < Total_Size)
+            while(Result.Length < Total_Size)
             {
-               size Single_Read = read(File, Result.Memory+Result.Size, Total_Size-Result.Size);
+               size Single_Read = read(File, Result.Data+Result.Length, Total_Size-Result.Length);
                if(Single_Read == 0)
                {
                   break; // Done.
@@ -76,13 +84,13 @@ static READ_ENTIRE_FILE(Read_Entire_File)
                }
                else
                {
-                  Result.Size += Single_Read;
+                  Result.Length += Single_Read;
                }
             }
-            Assert(Result.Size == Total_Size);
+            Assert(Result.Length == Total_Size);
 
             // NOTE: Null terminate.
-            Result.Memory[Result.Size] = 0;
+            Result.Data[Result.Length] = 0;
          }
          else
          {
@@ -100,6 +108,14 @@ static READ_ENTIRE_FILE(Read_Entire_File)
    }
 
    return(Result);
+}
+
+static GET_WINDOW_DIMENSIONS(Get_Window_Dimensions)
+{
+   wayland_context *Wayland = (wayland_context *)Platform_Context;
+
+   *Width = Wayland->Window_Width;
+   *Height = Wayland->Window_Height;
 }
 
 // NOTE: Configure the global registry and its callbacks.
@@ -145,6 +161,15 @@ static const struct xdg_wm_base_listener Desktop_Base_Listener =
 static void Configure_Desktop_Surface(void *Data, struct xdg_surface *Surface, u32 Serial)
 {
    xdg_surface_ack_configure(Surface, Serial);
+
+   wayland_context *Wayland = Data;
+   if(Wayland->Window_Width != Wayland->Previous_Window_Width ||
+      Wayland->Window_Height != Wayland->Previous_Window_Height)
+   {
+      Wayland->VK.Framebuffer_Resized = true;
+      Wayland->Previous_Window_Width = Wayland->Window_Width;
+      Wayland->Previous_Window_Height = Wayland->Window_Height;
+   }
 }
 static const struct xdg_surface_listener Desktop_Surface_Listener =
 {
@@ -159,6 +184,11 @@ static void Configure_Desktop_Toplevel(void *Data, struct xdg_toplevel *Toplevel
    {
       Wayland->Window_Width = Width;
       Wayland->Window_Height = Height;
+   }
+   else
+   {
+      Wayland->Window_Width = DEFAULT_RESOLUTION_WIDTH;
+      Wayland->Window_Height = DEFAULT_RESOLUTION_HEIGHT;
    }
 }
 static void Close_Desktop_Toplevel(void *Data, struct xdg_toplevel *Toplevel)
@@ -389,21 +419,19 @@ static void Initialize_Wayland(wayland_context *Wayland, int Width, int Height)
 int main(void)
 {
    wayland_context Wayland = {0};
-   Initialize_Wayland(&Wayland, 640, 480);
-
-   vulkan_context VK = {0};
-   Initialize_Vulkan(&VK, 640, 480, &Wayland);
+   Initialize_Wayland(&Wayland, DEFAULT_RESOLUTION_WIDTH, DEFAULT_RESOLUTION_HEIGHT);
+   Initialize_Vulkan(&Wayland.VK, &Wayland);
 
    while(Wayland.Running)
    {
       wl_display_dispatch_pending(Wayland.Display);
 
-      Render_With_Vulkan(&VK);
+      Render_With_Vulkan(&Wayland.VK);
 
       wl_display_flush(Wayland.Display);
    }
 
-   Destroy_Vulkan(&VK);
+   Destroy_Vulkan(&Wayland.VK);
    Destroy_Wayland(&Wayland);
 
    return(0);

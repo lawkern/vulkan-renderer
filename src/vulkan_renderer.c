@@ -10,7 +10,6 @@
       }                                                                 \
    } while(0)
 
-
 static bool Vulkan_Extensions_Supported(VkExtensionProperties *Extensions, u32 Extension_Count,
                                         const char **Required_Names, u32 Required_Count)
 {
@@ -60,9 +59,175 @@ static void Confirm_Vulkan_Device_Extensions(VkPhysicalDevice Physical_Device, c
    Assert(Found_All);
 }
 
+static void Destroy_Vulkan_Swapchain(vulkan_context *VK)
+{
+   for(u32 Image_Index = 0; Image_Index < VK->Swapchain_Image_Count; ++Image_Index)
+   {
+      vkDestroyFramebuffer(VK->Device, VK->Swapchain_Framebuffers[Image_Index], 0);
+      vkDestroyImageView(VK->Device, VK->Swapchain_Image_Views[Image_Index], 0);
+   }
+   vkDestroySwapchainKHR(VK->Device, VK->Swapchain, 0);
+}
+
+static void Create_Vulkan_Swapchain(vulkan_context *VK)
+{
+   VkSurfaceCapabilitiesKHR Surface_Capabilities;
+   vkGetPhysicalDeviceSurfaceCapabilitiesKHR(VK->Physical_Device, VK->Surface, &Surface_Capabilities);
+
+   u32 Surface_Format_Count;
+   vkGetPhysicalDeviceSurfaceFormatsKHR(VK->Physical_Device, VK->Surface, &Surface_Format_Count, 0);
+   Assert(Surface_Format_Count > 0);
+
+   VkSurfaceFormatKHR *Surface_Formats = Allocate(&VK->Scratch, VkSurfaceFormatKHR, Surface_Format_Count);
+   vkGetPhysicalDeviceSurfaceFormatsKHR(VK->Physical_Device, VK->Surface, &Surface_Format_Count, Surface_Formats);
+
+   bool Desired_Format_Supported = false;
+   VkSurfaceFormatKHR Desired_Format;
+
+   for(u32 Format_Index = 0; Format_Index < Surface_Format_Count; ++Format_Index)
+   {
+      VkSurfaceFormatKHR Option = Surface_Formats[Format_Index];
+      if(Option.format == VK_FORMAT_R8G8B8A8_SRGB && Option.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
+      {
+         Desired_Format = Option;
+         Desired_Format_Supported = true;
+         break;
+      }
+   }
+   Assert(Desired_Format_Supported);
+   VK->Swapchain_Image_Format = Desired_Format.format;
+
+   u32 Present_Mode_Count;
+   vkGetPhysicalDeviceSurfacePresentModesKHR(VK->Physical_Device, VK->Surface, &Present_Mode_Count, 0);
+   Assert(Present_Mode_Count > 0);
+
+   VkPresentModeKHR *Present_Modes = Allocate(&VK->Scratch, VkPresentModeKHR, Present_Mode_Count);
+   vkGetPhysicalDeviceSurfacePresentModesKHR(VK->Physical_Device, VK->Surface, &Present_Mode_Count, Present_Modes);
+
+   VkPresentModeKHR Desired_Present_Mode = VK_PRESENT_MODE_FIFO_KHR;
+   bool Desired_Present_Mode_Found = false;
+
+   for(u32 Mode_Index = 0; Mode_Index < Present_Mode_Count; ++Mode_Index)
+   {
+      VkPresentModeKHR Option = Present_Modes[Mode_Index];
+      if(Option == VK_PRESENT_MODE_MAILBOX_KHR)
+      {
+         Desired_Present_Mode = Option;
+         Desired_Present_Mode_Found = true;
+      }
+   }
+   // Assert(Desired_Present_Mode_Found);
+
+   VK->Swapchain_Extent = Surface_Capabilities.currentExtent;
+   if(VK->Swapchain_Extent.width == UINT32_MAX && VK->Swapchain_Extent.height == UINT32_MAX)
+   {
+      // NOTE: UINT32_MAX is a special case that allows us to specify our own
+      // extent dimensions.
+      int Width, Height;
+      Get_Window_Dimensions(VK->Platform_Context, &Width, &Height);
+
+      VK->Swapchain_Extent.width = Minimum(Maximum((u32)Width, Surface_Capabilities.minImageExtent.width), Surface_Capabilities.maxImageExtent.width);
+      VK->Swapchain_Extent.height = Minimum(Maximum((u32)Height, Surface_Capabilities.minImageExtent.height), Surface_Capabilities.maxImageExtent.height);
+   }
+
+   u32 Image_Count = Surface_Capabilities.minImageCount + 1;
+   if(Surface_Capabilities.maxImageCount && Surface_Capabilities.maxImageCount < Image_Count)
+   {
+      Image_Count = Surface_Capabilities.maxImageCount;
+   }
+
+   VkSwapchainCreateInfoKHR Swapchain_Info = {0};
+   Swapchain_Info.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+   Swapchain_Info.surface = VK->Surface;
+   Swapchain_Info.minImageCount = Image_Count;
+   Swapchain_Info.imageFormat = Desired_Format.format;
+   Swapchain_Info.imageColorSpace = Desired_Format.colorSpace;
+   Swapchain_Info.imageExtent = VK->Swapchain_Extent;
+   Swapchain_Info.imageArrayLayers = 1;
+   Swapchain_Info.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+
+   u32 Swapchain_Queue_Family_Indices[] = {VK->Graphics_Queue_Family_Index, VK->Present_Queue_Family_Index};
+   if(VK->Graphics_Queue_Family_Index == VK->Present_Queue_Family_Index)
+   {
+      Swapchain_Info.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+   }
+   else
+   {
+      Swapchain_Info.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
+      Swapchain_Info.queueFamilyIndexCount = Array_Count(Swapchain_Queue_Family_Indices);
+      Swapchain_Info.pQueueFamilyIndices = Swapchain_Queue_Family_Indices;
+   }
+
+   Swapchain_Info.preTransform = Surface_Capabilities.currentTransform;
+   Swapchain_Info.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+   Swapchain_Info.presentMode = Desired_Present_Mode;
+   Swapchain_Info.clipped = VK_TRUE;
+   Swapchain_Info.oldSwapchain = VK_NULL_HANDLE;
+
+   VK_CHECK(vkCreateSwapchainKHR(VK->Device, &Swapchain_Info, 0, &VK->Swapchain));
+
+   vkGetSwapchainImagesKHR(VK->Device, VK->Swapchain, &VK->Swapchain_Image_Count, 0);
+   VK->Swapchain_Images = Allocate(&VK->Arena, VkImage, VK->Swapchain_Image_Count);
+   vkGetSwapchainImagesKHR(VK->Device, VK->Swapchain, &VK->Swapchain_Image_Count, VK->Swapchain_Images);
+
+   VK->Swapchain_Image_Views = Allocate(&VK->Arena, VkImageView, VK->Swapchain_Image_Count);
+   for(u32 Image_Index = 0; Image_Index < VK->Swapchain_Image_Count; ++Image_Index)
+   {
+      VkImageViewCreateInfo View_Info = {0};
+      View_Info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+      View_Info.image = VK->Swapchain_Images[Image_Index];
+      View_Info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+      View_Info.format = VK->Swapchain_Image_Format;
+      View_Info.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+      View_Info.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+      View_Info.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+      View_Info.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+      View_Info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+      View_Info.subresourceRange.baseMipLevel = 0;
+      View_Info.subresourceRange.levelCount = 1;
+      View_Info.subresourceRange.baseArrayLayer = 0;
+      View_Info.subresourceRange.layerCount = 1;
+
+      VK_CHECK(vkCreateImageView(VK->Device, &View_Info, 0, &VK->Swapchain_Image_Views[Image_Index]));
+   }
+}
+
+static void Create_Vulkan_Framebuffers(vulkan_context *VK)
+{
+   VK->Swapchain_Framebuffers = Allocate(&VK->Arena, VkFramebuffer, VK->Swapchain_Image_Count);
+   for(u32 Image_Index = 0; Image_Index < VK->Swapchain_Image_Count; ++Image_Index)
+   {
+      VkImageView Attachments[] = {VK->Swapchain_Image_Views[Image_Index]};
+
+      VkFramebufferCreateInfo Framebuffer_Info = {0};
+      Framebuffer_Info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+      Framebuffer_Info.renderPass = VK->Render_Pass;
+      Framebuffer_Info.attachmentCount = 1;
+      Framebuffer_Info.pAttachments = Attachments;
+      Framebuffer_Info.width = VK->Swapchain_Extent.width;
+      Framebuffer_Info.height = VK->Swapchain_Extent.height;
+      Framebuffer_Info.layers = 1;
+
+      VK_CHECK(vkCreateFramebuffer(VK->Device, &Framebuffer_Info, 0, VK->Swapchain_Framebuffers + Image_Index));
+   }
+}
+
+static void Recreate_Vulkan_Swapchain(vulkan_context *VK)
+{
+   // TODO: Handle minimized windows with a width/height of zero.
+   vkDeviceWaitIdle(VK->Device);
+
+   Destroy_Vulkan_Swapchain(VK);
+   Create_Vulkan_Swapchain(VK);
+   Create_Vulkan_Framebuffers(VK);
+}
+
 static INITIALIZE_VULKAN(Initialize_Vulkan)
 {
-   arena Arena = Make_Arena(Megabytes(256));
+   VK->Platform_Context = Platform_Context;
+
+   VK->Arena = Make_Arena(Megabytes(256));
+   VK->Scratch = Make_Arena(Megabytes(256));
 
    // NOTE: Initialize the Vulkan instance.
    VkApplicationInfo Application_Info = {0};
@@ -77,7 +242,7 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
       VK_KHR_SURFACE_EXTENSION_NAME,
       VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME,
    };
-   Confirm_Vulkan_Instance_Extensions(Instance_Extension_Names, Array_Count(Instance_Extension_Names), Arena);
+   Confirm_Vulkan_Instance_Extensions(Instance_Extension_Names, Array_Count(Instance_Extension_Names), VK->Scratch);
 
    VkInstanceCreateInfo Instance_Info = {0};
    Instance_Info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
@@ -97,7 +262,7 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
    VK_CHECK(vkEnumeratePhysicalDevices(VK->Instance, &Physical_Count, 0));
    Assert(Physical_Count > 0);
 
-   VkPhysicalDevice *Physical_Devices = Allocate(&Arena, VkPhysicalDevice, Physical_Count);
+   VkPhysicalDevice *Physical_Devices = Allocate(&VK->Scratch, VkPhysicalDevice, Physical_Count);
    VK_CHECK(vkEnumeratePhysicalDevices(VK->Instance, &Physical_Count, Physical_Devices));
 
    VK->Physical_Device = VK_NULL_HANDLE;
@@ -114,11 +279,9 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
 
       VkPhysicalDeviceMemoryProperties Memory_Properties;
       vkGetPhysicalDeviceMemoryProperties(Physical_Device, &Memory_Properties);
-
       for(u32 Heap_Index = 0; Heap_Index < Memory_Properties.memoryHeapCount; ++Heap_Index)
       {
          VkMemoryHeap *Heap = Memory_Properties.memoryHeaps + Heap_Index;
-         printf("  Heap %d Size: %lu\n", Heap_Index, Heap->size);
       }
 
       // TODO: For now, just use the first encountered device. Later we'll query for
@@ -147,16 +310,12 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
    u32 Queue_Family_Count;
    vkGetPhysicalDeviceQueueFamilyProperties(VK->Physical_Device, &Queue_Family_Count, 0);
 
-   VkQueueFamilyProperties *Queue_Families = Allocate(&Arena, VkQueueFamilyProperties, Queue_Family_Count);
+   VkQueueFamilyProperties *Queue_Families = Allocate(&VK->Scratch, VkQueueFamilyProperties, Queue_Family_Count);
    vkGetPhysicalDeviceQueueFamilyProperties(VK->Physical_Device, &Queue_Family_Count, Queue_Families);
 
    bool Compute_Queue_Family_Found = false;
    bool Graphics_Queue_Family_Found = false;
    bool Present_Queue_Family_Found = false;
-
-   u32 Compute_Queue_Family_Index;
-   u32 Graphics_Queue_Family_Index;
-   u32 Present_Queue_Family_Index;
 
    // NOTE: For now, the array length is just hard coded to the max number of
    // potential queue families we might have.
@@ -174,14 +333,14 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
       {
          Use_This_Family = true;
          Compute_Queue_Family_Found = true;
-         Compute_Queue_Family_Index = Family_Index;
+         VK->Compute_Queue_Family_Index = Family_Index;
       }
 
       if(Family.queueFlags & VK_QUEUE_GRAPHICS_BIT)
       {
          Use_This_Family = true;
          Graphics_Queue_Family_Found = true;
-         Graphics_Queue_Family_Index = Family_Index;
+         VK->Graphics_Queue_Family_Index = Family_Index;
       }
 
       VkBool32 Present_Support;
@@ -190,7 +349,7 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
       {
          Use_This_Family = true;
          Present_Queue_Family_Found = true;
-         Present_Queue_Family_Index = Family_Index;
+         VK->Present_Queue_Family_Index = Family_Index;
       }
 
       if(Use_This_Family)
@@ -221,7 +380,7 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
    // NOTE: Create the logical device.
    const char *Required_Device_Extension_Names[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
    Confirm_Vulkan_Device_Extensions(VK->Physical_Device, Required_Device_Extension_Names,
-                                    Array_Count(Required_Device_Extension_Names), Arena);
+                                    Array_Count(Required_Device_Extension_Names), VK->Scratch);
 
    VkDeviceCreateInfo Device_Create_Info = {0};
    Device_Create_Info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
@@ -232,141 +391,26 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
 
    VK_CHECK(vkCreateDevice(VK->Physical_Device, &Device_Create_Info, 0, &VK->Device));
 
-   vkGetDeviceQueue(VK->Device, Compute_Queue_Family_Index, 0, &VK->Compute_Queue);
-   vkGetDeviceQueue(VK->Device, Graphics_Queue_Family_Index, 0, &VK->Graphics_Queue);
-   vkGetDeviceQueue(VK->Device, Present_Queue_Family_Index, 0, &VK->Present_Queue);
+   vkGetDeviceQueue(VK->Device, VK->Compute_Queue_Family_Index, 0, &VK->Compute_Queue);
+   vkGetDeviceQueue(VK->Device, VK->Graphics_Queue_Family_Index, 0, &VK->Graphics_Queue);
+   vkGetDeviceQueue(VK->Device, VK->Present_Queue_Family_Index, 0, &VK->Present_Queue);
 
    // NOTE: Initialize swap chain.
-   VkSurfaceCapabilitiesKHR Surface_Capabilities;
-   vkGetPhysicalDeviceSurfaceCapabilitiesKHR(VK->Physical_Device, VK->Surface, &Surface_Capabilities);
-
-   u32 Surface_Format_Count;
-   vkGetPhysicalDeviceSurfaceFormatsKHR(VK->Physical_Device, VK->Surface, &Surface_Format_Count, 0);
-   Assert(Surface_Format_Count > 0);
-
-   VkSurfaceFormatKHR *Surface_Formats = Allocate(&Arena, VkSurfaceFormatKHR, Surface_Format_Count);
-   vkGetPhysicalDeviceSurfaceFormatsKHR(VK->Physical_Device, VK->Surface, &Surface_Format_Count, Surface_Formats);
-
-   bool Desired_Format_Supported = false;
-   VkSurfaceFormatKHR Desired_Format;
-
-   for(u32 Format_Index = 0; Format_Index < Surface_Format_Count; ++Format_Index)
-   {
-      VkSurfaceFormatKHR Option = Surface_Formats[Format_Index];
-      if(Option.format == VK_FORMAT_R8G8B8A8_SRGB && Option.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
-      {
-         Desired_Format = Option;
-         Desired_Format_Supported = true;
-         break;
-      }
-   }
-   Assert(Desired_Format_Supported);
-   VK->Swapchain_Image_Format = Desired_Format.format;
-
-   u32 Present_Mode_Count;
-   vkGetPhysicalDeviceSurfacePresentModesKHR(VK->Physical_Device, VK->Surface, &Present_Mode_Count, 0);
-   Assert(Present_Mode_Count > 0);
-
-   VkPresentModeKHR *Present_Modes = Allocate(&Arena, VkPresentModeKHR, Present_Mode_Count);
-   vkGetPhysicalDeviceSurfacePresentModesKHR(VK->Physical_Device, VK->Surface, &Present_Mode_Count, Present_Modes);
-
-   VkPresentModeKHR Desired_Present_Mode = VK_PRESENT_MODE_FIFO_KHR;
-   bool Desired_Present_Mode_Found = false;
-
-   for(u32 Mode_Index = 0; Mode_Index < Present_Mode_Count; ++Mode_Index)
-   {
-      VkPresentModeKHR Option = Present_Modes[Mode_Index];
-      if(Option == VK_PRESENT_MODE_MAILBOX_KHR)
-      {
-         Desired_Present_Mode = Option;
-         Desired_Present_Mode_Found = true;
-      }
-   }
-   // Assert(Desired_Present_Mode_Found);
-
-   VK->Swapchain_Extent = Surface_Capabilities.currentExtent;
-   if(VK->Swapchain_Extent.width == UINT32_MAX && VK->Swapchain_Extent.height == UINT32_MAX)
-   {
-      // NOTE: UINT32_MAX is a special case that allows us to specify our own
-      // extent dimesnsions.
-      VK->Swapchain_Extent.width = Minimum(Maximum((u32)Width, Surface_Capabilities.minImageExtent.width), Surface_Capabilities.maxImageExtent.width);
-      VK->Swapchain_Extent.height = Minimum(Maximum((u32)Height, Surface_Capabilities.minImageExtent.height), Surface_Capabilities.maxImageExtent.height);
-   }
-
-   u32 Image_Count = Surface_Capabilities.minImageCount + 1;
-   if(Surface_Capabilities.maxImageCount && Surface_Capabilities.maxImageCount < Image_Count)
-   {
-      Image_Count = Surface_Capabilities.maxImageCount;
-   }
-
-   VkSwapchainCreateInfoKHR Swapchain_Info = {0};
-   Swapchain_Info.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
-   Swapchain_Info.surface = VK->Surface;
-   Swapchain_Info.minImageCount = Image_Count;
-   Swapchain_Info.imageFormat = Desired_Format.format;
-   Swapchain_Info.imageColorSpace = Desired_Format.colorSpace;
-   Swapchain_Info.imageExtent = VK->Swapchain_Extent;
-   Swapchain_Info.imageArrayLayers = 1;
-   Swapchain_Info.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-
-   u32 Swapchain_Queue_Family_Indices[] = {Graphics_Queue_Family_Index, Present_Queue_Family_Index};
-   if(Graphics_Queue_Family_Index == Present_Queue_Family_Index)
-   {
-      Swapchain_Info.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
-   }
-   else
-   {
-      Swapchain_Info.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
-      Swapchain_Info.queueFamilyIndexCount = Array_Count(Swapchain_Queue_Family_Indices);
-      Swapchain_Info.pQueueFamilyIndices = Swapchain_Queue_Family_Indices;
-   }
-
-   Swapchain_Info.preTransform = Surface_Capabilities.currentTransform;
-   Swapchain_Info.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-   Swapchain_Info.presentMode = Desired_Present_Mode;
-   Swapchain_Info.clipped = VK_TRUE;
-   Swapchain_Info.oldSwapchain = VK_NULL_HANDLE;
-
-   VK_CHECK(vkCreateSwapchainKHR(VK->Device, &Swapchain_Info, 0, &VK->Swapchain));
-
-   vkGetSwapchainImagesKHR(VK->Device, VK->Swapchain, &VK->Swapchain_Image_Count, 0);
-   VK->Swapchain_Images = Allocate(&Arena, VkImage, VK->Swapchain_Image_Count);
-   vkGetSwapchainImagesKHR(VK->Device, VK->Swapchain, &VK->Swapchain_Image_Count, VK->Swapchain_Images);
-
-   VK->Swapchain_Image_Views = Allocate(&Arena, VkImageView, VK->Swapchain_Image_Count);
-   for(u32 Image_Index = 0; Image_Index < VK->Swapchain_Image_Count; ++Image_Index)
-   {
-      VkImageViewCreateInfo View_Info = {0};
-      View_Info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-      View_Info.image = VK->Swapchain_Images[Image_Index];
-      View_Info.viewType = VK_IMAGE_VIEW_TYPE_2D;
-      View_Info.format = VK->Swapchain_Image_Format;
-      View_Info.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
-      View_Info.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
-      View_Info.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
-      View_Info.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
-      View_Info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-      View_Info.subresourceRange.baseMipLevel = 0;
-      View_Info.subresourceRange.levelCount = 1;
-      View_Info.subresourceRange.baseArrayLayer = 0;
-      View_Info.subresourceRange.layerCount = 1;
-
-      VK_CHECK(vkCreateImageView(VK->Device, &View_Info, 0, &VK->Swapchain_Image_Views[Image_Index]));
-   }
+   Create_Vulkan_Swapchain(VK);
 
    // NOTE: Initialize shaders.
-   platform_file Vertex_Shader_Code = Read_Entire_File("shaders/basic_vertex.spv");
-   platform_file Fragment_Shader_Code = Read_Entire_File("shaders/basic_fragment.spv");
+   string Vertex_Shader_Code = Read_Entire_File("basic_vertex.spv");
+   string Fragment_Shader_Code = Read_Entire_File("basic_fragment.spv");
 
    VkShaderModuleCreateInfo Vertex_Shader_Info = {0};
    Vertex_Shader_Info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-   Vertex_Shader_Info.codeSize = Vertex_Shader_Code.Size;
-   Vertex_Shader_Info.pCode = (u32 *)Vertex_Shader_Code.Memory;
+   Vertex_Shader_Info.codeSize = Vertex_Shader_Code.Length;
+   Vertex_Shader_Info.pCode = (u32 *)Vertex_Shader_Code.Data;
 
    VkShaderModuleCreateInfo Fragment_Shader_Info = {0};
    Fragment_Shader_Info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-   Fragment_Shader_Info.codeSize = Fragment_Shader_Code.Size;
-   Fragment_Shader_Info.pCode = (u32 *)Fragment_Shader_Code.Memory;
+   Fragment_Shader_Info.codeSize = Fragment_Shader_Code.Length;
+   Fragment_Shader_Info.pCode = (u32 *)Fragment_Shader_Code.Data;
 
    VK_CHECK(vkCreateShaderModule(VK->Device, &Vertex_Shader_Info, 0, &VK->Vertex_Shader));
    VK_CHECK(vkCreateShaderModule(VK->Device, &Fragment_Shader_Info, 0, &VK->Fragment_Shader));
@@ -498,12 +542,22 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
    Subpass.colorAttachmentCount = 1;
    Subpass.pColorAttachments = &Color_Attachment_Reference;
 
+   VkSubpassDependency Subpass_Dependency = {0};
+   Subpass_Dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+   Subpass_Dependency.dstSubpass = 0;
+   Subpass_Dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+   Subpass_Dependency.srcAccessMask = 0;
+   Subpass_Dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+   Subpass_Dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+
    VkRenderPassCreateInfo Render_Pass_Info = {0};
    Render_Pass_Info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
    Render_Pass_Info.attachmentCount = 1;
    Render_Pass_Info.pAttachments = &Color_Attachment;
    Render_Pass_Info.subpassCount = 1;
    Render_Pass_Info.pSubpasses = &Subpass;
+   Render_Pass_Info.dependencyCount = 1;
+   Render_Pass_Info.pDependencies = &Subpass_Dependency;
 
    VK_CHECK(vkCreateRenderPass(VK->Device, &Render_Pass_Info, 0, &VK->Render_Pass));
 
@@ -526,26 +580,167 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
    Pipeline_Info.basePipelineIndex = -1;
 
    VK_CHECK(vkCreateGraphicsPipelines(VK->Device, VK_NULL_HANDLE, 1, &Pipeline_Info, 0, &VK->Graphics_Pipeline));
+
+   // NOTE: Create command buffers.
+   VkCommandPoolCreateInfo Pool_Info = {0};
+   Pool_Info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+   Pool_Info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+   Pool_Info.queueFamilyIndex = VK->Graphics_Queue_Family_Index;
+
+   VK_CHECK(vkCreateCommandPool(VK->Device, &Pool_Info, 0, &VK->Command_Pool));
+
+   VkCommandBufferAllocateInfo Allocate_Info = {0};
+   Allocate_Info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+   Allocate_Info.commandPool = VK->Command_Pool;
+   Allocate_Info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+   Allocate_Info.commandBufferCount = Array_Count(VK->Command_Buffers);
+
+   VK_CHECK(vkAllocateCommandBuffers(VK->Device, &Allocate_Info, VK->Command_Buffers));
+
+   // NOTE: Configure synchronization.
+   for(int Frame_Index = 0; Frame_Index < MAX_FRAMES_IN_FLIGHT; ++Frame_Index)
+   {
+      VkSemaphoreCreateInfo Semaphore_Info = {0};
+      Semaphore_Info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+      VK_CHECK(vkCreateSemaphore(VK->Device, &Semaphore_Info, 0, VK->Image_Available_Semaphores + Frame_Index));
+      VK_CHECK(vkCreateSemaphore(VK->Device, &Semaphore_Info, 0, VK->Render_Finished_Semaphores + Frame_Index));
+
+      VkFenceCreateInfo Fence_Info = {0};
+      Fence_Info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+      Fence_Info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+      VK_CHECK(vkCreateFence(VK->Device, &Fence_Info, 0, VK->In_Flight_Fences + Frame_Index));
+   }
+
+   // NOTE: Create framebuffer.
+   Create_Vulkan_Framebuffers(VK);
+
+   Reset_Arena(&VK->Scratch);
 }
 
 static RENDER_WITH_VULKAN(Render_With_Vulkan)
 {
-   (void)VK;
+   vkWaitForFences(VK->Device, 1, VK->In_Flight_Fences + VK->Frame_Index, VK_TRUE, UINT64_MAX);
+
+   u32 Image_Index;
+   VkResult Image_Acquisition_Result = vkAcquireNextImageKHR(VK->Device, VK->Swapchain, UINT64_MAX, VK->Image_Available_Semaphores[VK->Frame_Index], VK_NULL_HANDLE, &Image_Index);
+   if(Image_Acquisition_Result == VK_ERROR_OUT_OF_DATE_KHR)
+   {
+      Recreate_Vulkan_Swapchain(VK);
+   }
+   else
+   {
+      VK_CHECK(Image_Acquisition_Result);
+
+      vkResetFences(VK->Device, 1, VK->In_Flight_Fences + VK->Frame_Index);
+      vkResetCommandBuffer(VK->Command_Buffers[VK->Frame_Index], 0);
+
+      // NOTE: Record render commands.
+      VkCommandBufferBeginInfo Buffer_Begin_Info = {0};
+      Buffer_Begin_Info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+      Buffer_Begin_Info.flags = 0;
+      Buffer_Begin_Info.pInheritanceInfo = 0;
+
+      VK_CHECK(vkBeginCommandBuffer(VK->Command_Buffers[VK->Frame_Index], &Buffer_Begin_Info));
+
+      VkRenderPassBeginInfo Pass_Begin_Info = {0};
+      Pass_Begin_Info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+      Pass_Begin_Info.renderPass = VK->Render_Pass;
+      Pass_Begin_Info.framebuffer = VK->Swapchain_Framebuffers[Image_Index];
+      Pass_Begin_Info.renderArea.extent = VK->Swapchain_Extent;
+      VkClearValue Clear_Color = {{{0, 0, 1, 1}}};
+      Pass_Begin_Info.clearValueCount = 1;
+      Pass_Begin_Info.pClearValues = &Clear_Color;
+
+      vkCmdBeginRenderPass(VK->Command_Buffers[VK->Frame_Index], &Pass_Begin_Info, VK_SUBPASS_CONTENTS_INLINE);
+      {
+         vkCmdBindPipeline(VK->Command_Buffers[VK->Frame_Index], VK_PIPELINE_BIND_POINT_GRAPHICS, VK->Graphics_Pipeline);
+
+         VkViewport Viewport = {0};
+         Viewport.x = 0.0f;
+         Viewport.y = 0.0f;
+         Viewport.width = (float)VK->Swapchain_Extent.width;
+         Viewport.height = (float)VK->Swapchain_Extent.height;
+         Viewport.minDepth = 0.0f;
+         Viewport.maxDepth = 1.0f;
+         vkCmdSetViewport(VK->Command_Buffers[VK->Frame_Index], 0, 1, &Viewport);
+
+         VkRect2D Scissor = {0};
+         Scissor.extent = VK->Swapchain_Extent;
+         vkCmdSetScissor(VK->Command_Buffers[VK->Frame_Index], 0, 1, &Scissor);
+
+         vkCmdDraw(VK->Command_Buffers[VK->Frame_Index], 3, 1, 0, 0);
+      }
+      vkCmdEndRenderPass(VK->Command_Buffers[VK->Frame_Index]);
+      VK_CHECK(vkEndCommandBuffer(VK->Command_Buffers[VK->Frame_Index]));
+
+      // NOTE: Submit command buffer.
+      VkSubmitInfo Submit_Info = {0};
+      Submit_Info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+
+      VkSemaphore Wait_Semaphores[] = {VK->Image_Available_Semaphores[VK->Frame_Index]};
+      VkPipelineStageFlags Wait_Stages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+      Assert(Array_Count(Wait_Semaphores) == Array_Count(Wait_Stages));
+
+      Submit_Info.waitSemaphoreCount = Array_Count(Wait_Semaphores);
+      Submit_Info.pWaitSemaphores = Wait_Semaphores;
+      Submit_Info.pWaitDstStageMask = Wait_Stages;
+      Submit_Info.commandBufferCount = 1;
+      Submit_Info.pCommandBuffers = VK->Command_Buffers + VK->Frame_Index;
+
+      VkSemaphore Signal_Semaphores[] = {VK->Render_Finished_Semaphores[VK->Frame_Index]};
+      Submit_Info.signalSemaphoreCount = Array_Count(Signal_Semaphores);
+      Submit_Info.pSignalSemaphores = Signal_Semaphores;
+
+      VK_CHECK(vkQueueSubmit(VK->Graphics_Queue, 1, &Submit_Info, VK->In_Flight_Fences[VK->Frame_Index]));
+
+      VkPresentInfoKHR Present_Info = {0};
+      Present_Info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+      Present_Info.waitSemaphoreCount = 1;
+      Present_Info.pWaitSemaphores = Signal_Semaphores;
+
+      VkSwapchainKHR Swapchains[] = {VK->Swapchain};
+      Present_Info.swapchainCount = 1;
+      Present_Info.pSwapchains = Swapchains;
+      Present_Info.pImageIndices = &Image_Index;
+      Present_Info.pResults = 0;
+
+      VkResult Present_Result = vkQueuePresentKHR(VK->Present_Queue, &Present_Info);
+      if(Present_Result == VK_ERROR_OUT_OF_DATE_KHR || Present_Result == VK_SUBOPTIMAL_KHR || VK->Framebuffer_Resized)
+      {
+         VK->Framebuffer_Resized = false;
+         Recreate_Vulkan_Swapchain(VK);
+      }
+      else
+      {
+         VK_CHECK(Present_Result);
+      }
+
+      VK->Frame_Index++;
+      VK->Frame_Index %= MAX_FRAMES_IN_FLIGHT;
+      Reset_Arena(&VK->Scratch);
+   }
 }
 
 static DESTROY_VULKAN(Destroy_Vulkan)
 {
+   vkDeviceWaitIdle(VK->Device);
+   for(int Frame_Index = 0; Frame_Index < MAX_FRAMES_IN_FLIGHT; ++Frame_Index)
+   {
+      vkDestroySemaphore(VK->Device, VK->Render_Finished_Semaphores[Frame_Index], 0);
+      vkDestroySemaphore(VK->Device, VK->Image_Available_Semaphores[Frame_Index], 0);
+      vkDestroyFence(VK->Device, VK->In_Flight_Fences[Frame_Index], 0);
+   }
+
+   Destroy_Vulkan_Swapchain(VK);
+   vkDestroyCommandPool(VK->Device, VK->Command_Pool, 0);
+
    vkDestroyPipeline(VK->Device, VK->Graphics_Pipeline, 0);
    vkDestroyPipelineLayout(VK->Device, VK->Pipeline_Layout, 0);
    vkDestroyRenderPass(VK->Device, VK->Render_Pass, 0);
-   vkDestroyPipelineLayout(VK->Device, VK->Pipeline_Layout, 0);
    vkDestroyShaderModule(VK->Device, VK->Fragment_Shader, 0);
    vkDestroyShaderModule(VK->Device, VK->Vertex_Shader, 0);
-   for(u32 Image_Index = 0; Image_Index < VK->Swapchain_Image_Count; ++Image_Index)
-   {
-      vkDestroyImageView(VK->Device, VK->Swapchain_Image_Views[Image_Index], 0);
-   }
-   vkDestroySwapchainKHR(VK->Device, VK->Swapchain, 0);
+
    vkDestroyDevice(VK->Device, 0);
+   vkDestroySurfaceKHR(VK->Instance, VK->Surface, 0);
    vkDestroyInstance(VK->Instance, 0);
 }
