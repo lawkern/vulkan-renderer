@@ -1,5 +1,17 @@
 /* (c) copyright 2025 Lawrence D. Kern /////////////////////////////////////// */
 
+typedef struct {
+   vec2 Position;
+   vec3 Color;
+} vertex;
+
+static vertex Vertices[] =
+{
+   {{ 0.0f, -0.5f}, {1.0f, 1.0f, 0.0f}},
+   {{ 0.5f,  0.5f}, {0.0f, 1.0f, 1.0f}},
+   {{-0.5f,  0.5f}, {1.0f, 0.0f, 1.0f}},
+};
+
 #define VK_CHECK(Result)                                                \
    do {                                                                 \
       VkResult Err = (Result);                                          \
@@ -10,8 +22,7 @@
       }                                                                 \
    } while(0)
 
-static bool Vulkan_Extensions_Supported(VkExtensionProperties *Extensions, u32 Extension_Count,
-                                        const char **Required_Names, u32 Required_Count)
+static bool Vulkan_Extensions_Supported(VkExtensionProperties *Extensions, u32 Extension_Count, const char **Required_Names, u32 Required_Count)
 {
    bool Result = true;
    for(u32 Required_Index = 0; Required_Index < Required_Count; ++Required_Index)
@@ -225,7 +236,6 @@ static void Recreate_Vulkan_Swapchain(vulkan_context *VK)
 static INITIALIZE_VULKAN(Initialize_Vulkan)
 {
    VK->Platform_Context = Platform_Context;
-
    VK->Arena = Make_Arena(Megabytes(256));
    VK->Scratch = Make_Arena(Megabytes(256));
 
@@ -276,13 +286,6 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
 
       VkPhysicalDeviceFeatures Features;
       vkGetPhysicalDeviceFeatures(Physical_Device, &Features);
-
-      VkPhysicalDeviceMemoryProperties Memory_Properties;
-      vkGetPhysicalDeviceMemoryProperties(Physical_Device, &Memory_Properties);
-      for(u32 Heap_Index = 0; Heap_Index < Memory_Properties.memoryHeapCount; ++Heap_Index)
-      {
-         VkMemoryHeap *Heap = Memory_Properties.memoryHeaps + Heap_Index;
-      }
 
       // TODO: For now, just use the first encountered device. Later we'll query for
       // the most appropriate properties.
@@ -430,12 +433,27 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
    VkPipelineShaderStageCreateInfo Shader_Stage_Infos[] = {Vertex_Stage_Info, Fragment_Stage_Info};
 
    // NOTE: Configure pipeline inputs.
+   VkVertexInputBindingDescription Vertex_Binding_Description = {0};
+   Vertex_Binding_Description.binding = 0;
+   Vertex_Binding_Description.stride = sizeof(*Vertices);
+   Vertex_Binding_Description.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+
+   VkVertexInputAttributeDescription Vertex_Attribute_Descriptions[2] = {0};
+   Vertex_Attribute_Descriptions[0].binding = 0;
+   Vertex_Attribute_Descriptions[0].location = 0;
+   Vertex_Attribute_Descriptions[0].format = VK_FORMAT_R32G32_SFLOAT;
+   Vertex_Attribute_Descriptions[0].offset = offsetof(vertex, Position);
+   Vertex_Attribute_Descriptions[1].binding = 0;
+   Vertex_Attribute_Descriptions[1].location = 1;
+   Vertex_Attribute_Descriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
+   Vertex_Attribute_Descriptions[1].offset = offsetof(vertex, Color);
+
    VkPipelineVertexInputStateCreateInfo Vertex_Input_Info = {0};
    Vertex_Input_Info.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-   Vertex_Input_Info.vertexBindingDescriptionCount = 0;
-   Vertex_Input_Info.pVertexBindingDescriptions = 0;
-   Vertex_Input_Info.vertexAttributeDescriptionCount = 0;
-   Vertex_Input_Info.pVertexAttributeDescriptions = 0;
+   Vertex_Input_Info.vertexBindingDescriptionCount = 1;
+   Vertex_Input_Info.pVertexBindingDescriptions = &Vertex_Binding_Description;
+   Vertex_Input_Info.vertexAttributeDescriptionCount = Array_Count(Vertex_Attribute_Descriptions);
+   Vertex_Input_Info.pVertexAttributeDescriptions = Vertex_Attribute_Descriptions;
 
    VkPipelineInputAssemblyStateCreateInfo Input_Assembly_Info = {0};
    Input_Assembly_Info.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
@@ -581,6 +599,54 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
 
    VK_CHECK(vkCreateGraphicsPipelines(VK->Device, VK_NULL_HANDLE, 1, &Pipeline_Info, 0, &VK->Graphics_Pipeline));
 
+   // NOTE: Create vertex buffer.
+   VkBufferCreateInfo Vertex_Buffer_Info = {0};
+   Vertex_Buffer_Info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+   Vertex_Buffer_Info.size = sizeof(Vertices);
+   Vertex_Buffer_Info.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+   Vertex_Buffer_Info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+   VK_CHECK(vkCreateBuffer(VK->Device, &Vertex_Buffer_Info, 0, &VK->Vertex_Buffer));
+
+   VkMemoryRequirements Memory_Requirements;
+   vkGetBufferMemoryRequirements(VK->Device, VK->Vertex_Buffer, &Memory_Requirements);
+
+   VkPhysicalDeviceMemoryProperties Memory_Properties;
+   vkGetPhysicalDeviceMemoryProperties(VK->Physical_Device, &Memory_Properties);
+
+   u32 Required_Properties = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+   u32 Memory_Type_Index = 0;
+   u32 Memory_Type_Found = false;
+
+   for(u32 Type_Index = 0; Type_Index < Memory_Properties.memoryTypeCount; ++Type_Index)
+   {
+      VkMemoryType *Type = Memory_Properties.memoryTypes + Type_Index;
+
+      u32 Type_Supported = Memory_Requirements.memoryTypeBits & (1 << Type_Index);
+      u32 Properties_Supported = (Type->propertyFlags & Required_Properties) == Required_Properties;
+
+      if(Type_Supported && Properties_Supported)
+      {
+         Memory_Type_Index = Type_Index;
+         Memory_Type_Found = true;
+         break;
+      }
+   }
+   Assert(Memory_Type_Found);
+
+   VkMemoryAllocateInfo Vertex_Allocate_Info = {0};
+   Vertex_Allocate_Info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+   Vertex_Allocate_Info.allocationSize = Memory_Requirements.size;
+   Vertex_Allocate_Info.memoryTypeIndex = Memory_Type_Index;
+
+   VK_CHECK(vkAllocateMemory(VK->Device, &Vertex_Allocate_Info, 0, &VK->Vertex_Buffer_Memory));
+   VK_CHECK(vkBindBufferMemory(VK->Device, VK->Vertex_Buffer, VK->Vertex_Buffer_Memory, 0));
+
+   void *Vertex_Data;
+   VK_CHECK(vkMapMemory(VK->Device, VK->Vertex_Buffer_Memory, 0, Vertex_Buffer_Info.size, 0, &Vertex_Data));
+   memcpy(Vertex_Data, Vertices, Vertex_Buffer_Info.size);
+   vkUnmapMemory(VK->Device, VK->Vertex_Buffer_Memory);
+
    // NOTE: Create command buffers.
    VkCommandPoolCreateInfo Pool_Info = {0};
    Pool_Info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
@@ -614,6 +680,7 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
    // NOTE: Create framebuffer.
    Create_Vulkan_Framebuffers(VK);
 
+   // NOTE: Clear temporary memory.
    Reset_Arena(&VK->Scratch);
 }
 
@@ -655,6 +722,10 @@ static RENDER_WITH_VULKAN(Render_With_Vulkan)
       {
          vkCmdBindPipeline(VK->Command_Buffers[VK->Frame_Index], VK_PIPELINE_BIND_POINT_GRAPHICS, VK->Graphics_Pipeline);
 
+         VkBuffer Vertex_Buffers[] = {VK->Vertex_Buffer};
+         VkDeviceSize Vertex_Buffer_Offsets[] = {0};
+         vkCmdBindVertexBuffers(VK->Command_Buffers[VK->Frame_Index], 0, 1, Vertex_Buffers, Vertex_Buffer_Offsets);
+
          VkViewport Viewport = {0};
          Viewport.x = 0.0f;
          Viewport.y = 0.0f;
@@ -668,7 +739,7 @@ static RENDER_WITH_VULKAN(Render_With_Vulkan)
          Scissor.extent = VK->Swapchain_Extent;
          vkCmdSetScissor(VK->Command_Buffers[VK->Frame_Index], 0, 1, &Scissor);
 
-         vkCmdDraw(VK->Command_Buffers[VK->Frame_Index], 3, 1, 0, 0);
+         vkCmdDraw(VK->Command_Buffers[VK->Frame_Index], Array_Count(Vertices), 1, 0, 0);
       }
       vkCmdEndRenderPass(VK->Command_Buffers[VK->Frame_Index]);
       VK_CHECK(vkEndCommandBuffer(VK->Command_Buffers[VK->Frame_Index]));
@@ -733,6 +804,8 @@ static DESTROY_VULKAN(Destroy_Vulkan)
 
    Destroy_Vulkan_Swapchain(VK);
    vkDestroyCommandPool(VK->Device, VK->Command_Pool, 0);
+   vkDestroyBuffer(VK->Device, VK->Vertex_Buffer, 0);
+   vkFreeMemory(VK->Device, VK->Vertex_Buffer_Memory, 0);
 
    vkDestroyPipeline(VK->Device, VK->Graphics_Pipeline, 0);
    vkDestroyPipelineLayout(VK->Device, VK->Pipeline_Layout, 0);

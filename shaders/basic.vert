@@ -2,24 +2,13 @@
 
 #version 450
 
-layout(location = 0) out vec4 Fragment_Color;
+layout(location = 0) in vec2 Vertex_Position;
+layout(location = 1) in vec3 Vertex_Color;
 
-vec4 Positions[] =
-{
-   { 0.0f, -0.5f, 0.0f, 1.0f},
-   { 0.5f,  0.5f, 0.0f, 1.0f},
-   {-0.5f,  0.5f, 0.0f, 1.0f},
-};
-
-vec4 Colors[] =
-{
-   {1.0f, 1.0f, 0.0f, 1.0f},
-   {0.0f, 1.0f, 1.0f, 1.0f},
-   {1.0f, 0.0f, 1.0f, 1.0f},
-};
+layout(location = 0) out vec3 Fragment_Color;
 
 void main(void)
 {
-   Fragment_Color = Colors[gl_VertexIndex];
-   gl_Position = Positions[gl_VertexIndex];
+   Fragment_Color = Vertex_Color;
+   gl_Position = vec4(Vertex_Position, 0.0f, 1.0f);
 }

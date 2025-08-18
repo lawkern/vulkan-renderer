@@ -27,6 +27,17 @@ typedef uint64_t u64;
 typedef ptrdiff_t size;
 
 typedef struct {
+   float X;
+   float Y;
+} vec2;
+
+typedef struct {
+   float X;
+   float Y;
+   float Z;
+} vec3;
+
+typedef struct {
    size Length;
    u8 *Data;
 } string;
