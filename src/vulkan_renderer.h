@@ -34,6 +34,9 @@ typedef struct {
    VkBuffer Vertex_Buffer;
    VkDeviceMemory Vertex_Buffer_Memory;
 
+   VkBuffer Index_Buffer;
+   VkDeviceMemory Index_Buffer_Memory;
+
    VkCommandPool Command_Pool;
    VkCommandBuffer Command_Buffers[MAX_FRAMES_IN_FLIGHT];
 

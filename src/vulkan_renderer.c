@@ -7,9 +7,15 @@ typedef struct {
 
 static vertex Vertices[] =
 {
-   {{ 0.0f, -0.5f}, {1.0f, 1.0f, 0.0f}},
-   {{ 0.5f,  0.5f}, {0.0f, 1.0f, 1.0f}},
+   {{-0.5f, -0.5f}, {1.0f, 1.0f, 0.0f}},
+   {{ 0.5f, -0.5f}, {0.0f, 1.0f, 1.0f}},
+   {{ 0.5f,  0.5f}, {1.0f, 1.0f, 0.0f}},
    {{-0.5f,  0.5f}, {1.0f, 0.0f, 1.0f}},
+};
+
+static u16 Indices[] =
+{
+   0, 1, 2, 2, 3, 0,
 };
 
 static bool Vulkan_Extensions_Supported(VkExtensionProperties *Extensions, u32 Extension_Count, const char **Required_Names, u32 Required_Count)
@@ -300,6 +306,52 @@ static void Copy_Vulkan_Buffer(vulkan_context *VK, VkBuffer Destination, VkBuffe
    vkQueueWaitIdle(VK->Graphics_Queue);
 
    vkFreeCommandBuffers(VK->Device, VK->Command_Pool, 1, &Command_Buffer);
+}
+
+static void Create_Vulkan_Vertex_Buffer(vulkan_context *VK, vertex *Vertices, size Size)
+{
+   VkBuffer Staging_Buffer;
+   VkDeviceMemory Staging_Buffer_Memory;
+   VkBufferUsageFlags Staging_Buffer_Usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+   VkMemoryPropertyFlags Staging_Buffer_Properties = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+   Create_Vulkan_Buffer(VK, &Staging_Buffer, &Staging_Buffer_Memory, Size, Staging_Buffer_Usage, Staging_Buffer_Properties);
+
+   void *Data;
+   VK_CHECK(vkMapMemory(VK->Device, Staging_Buffer_Memory, 0, Size, 0, &Data));
+   memcpy(Data, Vertices, Size);
+   vkUnmapMemory(VK->Device, Staging_Buffer_Memory);
+
+   VkBufferUsageFlags Usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT|VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+   VkMemoryPropertyFlags Properties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+   Create_Vulkan_Buffer(VK, &VK->Vertex_Buffer, &VK->Vertex_Buffer_Memory, Size, Usage, Properties);
+
+   Copy_Vulkan_Buffer(VK, VK->Vertex_Buffer, Staging_Buffer, Size);
+
+   vkDestroyBuffer(VK->Device, Staging_Buffer, 0);
+   vkFreeMemory(VK->Device, Staging_Buffer_Memory, 0);
+}
+
+static void Create_Vulkan_Index_Buffer(vulkan_context *VK, u16 *Indices, size Size)
+{
+   VkBuffer Staging_Buffer;
+   VkDeviceMemory Staging_Buffer_Memory;
+   VkBufferUsageFlags Staging_Buffer_Usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+   VkMemoryPropertyFlags Staging_Buffer_Properties = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+   Create_Vulkan_Buffer(VK, &Staging_Buffer, &Staging_Buffer_Memory, Size, Staging_Buffer_Usage, Staging_Buffer_Properties);
+
+   void *Data;
+   VK_CHECK(vkMapMemory(VK->Device, Staging_Buffer_Memory, 0, Size, 0, &Data));
+   memcpy(Data, Indices, Size);
+   vkUnmapMemory(VK->Device, Staging_Buffer_Memory);
+
+   VkBufferUsageFlags Usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT|VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+   VkMemoryPropertyFlags Properties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+   Create_Vulkan_Buffer(VK, &VK->Index_Buffer, &VK->Index_Buffer_Memory, Size, Usage, Properties);
+
+   Copy_Vulkan_Buffer(VK, VK->Index_Buffer, Staging_Buffer, Size);
+
+   vkDestroyBuffer(VK->Device, Staging_Buffer, 0);
+   vkFreeMemory(VK->Device, Staging_Buffer_Memory, 0);
 }
 
 static INITIALIZE_VULKAN(Initialize_Vulkan)
@@ -684,28 +736,9 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
 
    VK_CHECK(vkAllocateCommandBuffers(VK->Device, &Allocate_Info, VK->Command_Buffers));
 
-   // NOTE: Create vertex buffer.
-   size Vertex_Buffer_Size = sizeof(Vertices);
-
-   VkBuffer Staging_Buffer;
-   VkDeviceMemory Staging_Buffer_Memory;
-   VkBufferUsageFlags Staging_Buffer_Usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-   VkMemoryPropertyFlags Staging_Buffer_Properties = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-   Create_Vulkan_Buffer(VK, &Staging_Buffer, &Staging_Buffer_Memory, Vertex_Buffer_Size, Staging_Buffer_Usage, Staging_Buffer_Properties);
-
-   void *Vertex_Data;
-   VK_CHECK(vkMapMemory(VK->Device, Staging_Buffer_Memory, 0, Vertex_Buffer_Size, 0, &Vertex_Data));
-   memcpy(Vertex_Data, Vertices, Vertex_Buffer_Size);
-   vkUnmapMemory(VK->Device, Staging_Buffer_Memory);
-
-   VkBufferUsageFlags Vertex_Buffer_Usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT|VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-   VkMemoryPropertyFlags Vertex_Buffer_Properties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-   Create_Vulkan_Buffer(VK, &VK->Vertex_Buffer, &VK->Vertex_Buffer_Memory, Vertex_Buffer_Size, Vertex_Buffer_Usage, Vertex_Buffer_Properties);
-
-   Copy_Vulkan_Buffer(VK, VK->Vertex_Buffer, Staging_Buffer, Vertex_Buffer_Size);
-
-   vkDestroyBuffer(VK->Device, Staging_Buffer, 0);
-   vkFreeMemory(VK->Device, Staging_Buffer_Memory, 0);
+   // NOTE: Create buffers.
+   Create_Vulkan_Vertex_Buffer(VK, Vertices, sizeof(Vertices));
+   Create_Vulkan_Index_Buffer(VK, Indices, sizeof(Indices));
 
    // NOTE: Configure synchronization.
    for(int Frame_Index = 0; Frame_Index < MAX_FRAMES_IN_FLIGHT; ++Frame_Index)
@@ -730,7 +763,8 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
 
 static RENDER_WITH_VULKAN(Render_With_Vulkan)
 {
-   vkWaitForFences(VK->Device, 1, VK->In_Flight_Fences + VK->Frame_Index, VK_TRUE, UINT64_MAX);
+   VkFence *In_Flight_Fence = VK->In_Flight_Fences + VK->Frame_Index;
+   vkWaitForFences(VK->Device, 1, In_Flight_Fence, VK_TRUE, UINT64_MAX);
 
    u32 Image_Index;
    VkResult Image_Acquisition_Result = vkAcquireNextImageKHR(VK->Device, VK->Swapchain, UINT64_MAX, VK->Image_Available_Semaphores[VK->Frame_Index], VK_NULL_HANDLE, &Image_Index);
@@ -741,9 +775,10 @@ static RENDER_WITH_VULKAN(Render_With_Vulkan)
    else
    {
       VK_CHECK(Image_Acquisition_Result);
+      vkResetFences(VK->Device, 1, In_Flight_Fence);
 
-      vkResetFences(VK->Device, 1, VK->In_Flight_Fences + VK->Frame_Index);
-      vkResetCommandBuffer(VK->Command_Buffers[VK->Frame_Index], 0);
+      VkCommandBuffer Command_Buffer = VK->Command_Buffers[VK->Frame_Index];
+      vkResetCommandBuffer(Command_Buffer, 0);
 
       // NOTE: Record render commands.
       VkCommandBufferBeginInfo Buffer_Begin_Info = {0};
@@ -751,7 +786,7 @@ static RENDER_WITH_VULKAN(Render_With_Vulkan)
       Buffer_Begin_Info.flags = 0;
       Buffer_Begin_Info.pInheritanceInfo = 0;
 
-      VK_CHECK(vkBeginCommandBuffer(VK->Command_Buffers[VK->Frame_Index], &Buffer_Begin_Info));
+      VK_CHECK(vkBeginCommandBuffer(Command_Buffer, &Buffer_Begin_Info));
 
       VkRenderPassBeginInfo Pass_Begin_Info = {0};
       Pass_Begin_Info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -762,13 +797,14 @@ static RENDER_WITH_VULKAN(Render_With_Vulkan)
       Pass_Begin_Info.clearValueCount = 1;
       Pass_Begin_Info.pClearValues = &Clear_Color;
 
-      vkCmdBeginRenderPass(VK->Command_Buffers[VK->Frame_Index], &Pass_Begin_Info, VK_SUBPASS_CONTENTS_INLINE);
+      vkCmdBeginRenderPass(Command_Buffer, &Pass_Begin_Info, VK_SUBPASS_CONTENTS_INLINE);
       {
-         vkCmdBindPipeline(VK->Command_Buffers[VK->Frame_Index], VK_PIPELINE_BIND_POINT_GRAPHICS, VK->Graphics_Pipeline);
+         vkCmdBindPipeline(Command_Buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, VK->Graphics_Pipeline);
 
          VkBuffer Vertex_Buffers[] = {VK->Vertex_Buffer};
          VkDeviceSize Vertex_Buffer_Offsets[] = {0};
-         vkCmdBindVertexBuffers(VK->Command_Buffers[VK->Frame_Index], 0, 1, Vertex_Buffers, Vertex_Buffer_Offsets);
+         vkCmdBindVertexBuffers(Command_Buffer, 0, 1, Vertex_Buffers, Vertex_Buffer_Offsets);
+         vkCmdBindIndexBuffer(Command_Buffer, VK->Index_Buffer, 0, VK_INDEX_TYPE_UINT16);
 
          VkViewport Viewport = {0};
          Viewport.x = 0.0f;
@@ -777,16 +813,16 @@ static RENDER_WITH_VULKAN(Render_With_Vulkan)
          Viewport.height = (float)VK->Swapchain_Extent.height;
          Viewport.minDepth = 0.0f;
          Viewport.maxDepth = 1.0f;
-         vkCmdSetViewport(VK->Command_Buffers[VK->Frame_Index], 0, 1, &Viewport);
+         vkCmdSetViewport(Command_Buffer, 0, 1, &Viewport);
 
          VkRect2D Scissor = {0};
          Scissor.extent = VK->Swapchain_Extent;
-         vkCmdSetScissor(VK->Command_Buffers[VK->Frame_Index], 0, 1, &Scissor);
+         vkCmdSetScissor(Command_Buffer, 0, 1, &Scissor);
 
-         vkCmdDraw(VK->Command_Buffers[VK->Frame_Index], Array_Count(Vertices), 1, 0, 0);
+         vkCmdDrawIndexed(Command_Buffer, Array_Count(Indices), 1, 0, 0, 0);
       }
-      vkCmdEndRenderPass(VK->Command_Buffers[VK->Frame_Index]);
-      VK_CHECK(vkEndCommandBuffer(VK->Command_Buffers[VK->Frame_Index]));
+      vkCmdEndRenderPass(Command_Buffer);
+      VK_CHECK(vkEndCommandBuffer(Command_Buffer));
 
       // NOTE: Submit command buffer.
       VkSubmitInfo Submit_Info = {0};
@@ -806,7 +842,7 @@ static RENDER_WITH_VULKAN(Render_With_Vulkan)
       Submit_Info.signalSemaphoreCount = Array_Count(Signal_Semaphores);
       Submit_Info.pSignalSemaphores = Signal_Semaphores;
 
-      VK_CHECK(vkQueueSubmit(VK->Graphics_Queue, 1, &Submit_Info, VK->In_Flight_Fences[VK->Frame_Index]));
+      VK_CHECK(vkQueueSubmit(VK->Graphics_Queue, 1, &Submit_Info, *In_Flight_Fence));
 
       VkPresentInfoKHR Present_Info = {0};
       Present_Info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -848,6 +884,10 @@ static DESTROY_VULKAN(Destroy_Vulkan)
 
    Destroy_Vulkan_Swapchain(VK);
    vkDestroyCommandPool(VK->Device, VK->Command_Pool, 0);
+
+   vkDestroyBuffer(VK->Device, VK->Index_Buffer, 0);
+   vkFreeMemory(VK->Device, VK->Index_Buffer_Memory, 0);
+
    vkDestroyBuffer(VK->Device, VK->Vertex_Buffer, 0);
    vkFreeMemory(VK->Device, VK->Vertex_Buffer_Memory, 0);
 
