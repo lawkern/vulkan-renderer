@@ -1,6 +1,6 @@
 /* (c) copyright 2025 Lawrence D. Kern /////////////////////////////////////// */
 
-// NOTE: Platform API.
+// NOTE: API to be implemented by each platform for use by the renderer:
 
 #define READ_ENTIRE_FILE(Name) string Name(char *Path)
 static READ_ENTIRE_FILE(Read_Entire_File);

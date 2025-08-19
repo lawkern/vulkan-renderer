@@ -53,7 +53,19 @@ typedef struct {
    bool Framebuffer_Resized;
 } vulkan_context;
 
-// TODO: Remove Wayland-specific parameters.
+#define VK_CHECK(Result)                                                \
+   do {                                                                 \
+      VkResult Err = (Result);                                          \
+      if(Err != VK_SUCCESS)                                             \
+      {                                                                 \
+         fprintf(stderr, "Vulkan Error: %s\n", string_VkResult(Err));   \
+         Invalid_Code_Path;                                             \
+      }                                                                 \
+   } while(0)
+
+
+// NOTE: Renderer API for use by each platform:
+
 #define INITIALIZE_VULKAN(Name) void Name(vulkan_context *VK, void *Platform_Context)
 static INITIALIZE_VULKAN(Initialize_Vulkan);
 

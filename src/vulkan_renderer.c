@@ -12,16 +12,6 @@ static vertex Vertices[] =
    {{-0.5f,  0.5f}, {1.0f, 0.0f, 1.0f}},
 };
 
-#define VK_CHECK(Result)                                                \
-   do {                                                                 \
-      VkResult Err = (Result);                                          \
-      if(Err != VK_SUCCESS)                                             \
-      {                                                                 \
-         fprintf(stderr, "Vulkan Error: %s\n", string_VkResult(Err));   \
-         Invalid_Code_Path;                                             \
-      }                                                                 \
-   } while(0)
-
 static bool Vulkan_Extensions_Supported(VkExtensionProperties *Extensions, u32 Extension_Count, const char **Required_Names, u32 Required_Count)
 {
    bool Result = true;
@@ -231,6 +221,85 @@ static void Recreate_Vulkan_Swapchain(vulkan_context *VK)
    Destroy_Vulkan_Swapchain(VK);
    Create_Vulkan_Swapchain(VK);
    Create_Vulkan_Framebuffers(VK);
+}
+
+static void Create_Vulkan_Buffer(vulkan_context *VK, VkBuffer *Buffer, VkDeviceMemory *Buffer_Memory, size Size, VkBufferUsageFlags Usage, VkMemoryPropertyFlags Properties)
+{
+   VkBufferCreateInfo Buffer_Info = {0};
+   Buffer_Info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+   Buffer_Info.size = Size;
+   Buffer_Info.usage = Usage;
+   Buffer_Info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+   VK_CHECK(vkCreateBuffer(VK->Device, &Buffer_Info, 0, Buffer));
+
+   VkMemoryRequirements Memory_Requirements;
+   vkGetBufferMemoryRequirements(VK->Device, *Buffer, &Memory_Requirements);
+
+   VkPhysicalDeviceMemoryProperties Memory_Properties;
+   vkGetPhysicalDeviceMemoryProperties(VK->Physical_Device, &Memory_Properties);
+
+   u32 Memory_Type_Index = 0;
+   u32 Memory_Type_Found = false;
+   for(u32 Type_Index = 0; Type_Index < Memory_Properties.memoryTypeCount; ++Type_Index)
+   {
+      VkMemoryType *Type = Memory_Properties.memoryTypes + Type_Index;
+
+      u32 Type_Supported = Memory_Requirements.memoryTypeBits & (1 << Type_Index);
+      u32 Properties_Supported = (Type->propertyFlags & Properties) == Properties;
+
+      if(Type_Supported && Properties_Supported)
+      {
+         Memory_Type_Index = Type_Index;
+         Memory_Type_Found = true;
+         break;
+      }
+   }
+   Assert(Memory_Type_Found);
+
+   VkMemoryAllocateInfo Vertex_Allocate_Info = {0};
+   Vertex_Allocate_Info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+   Vertex_Allocate_Info.allocationSize = Memory_Requirements.size;
+   Vertex_Allocate_Info.memoryTypeIndex = Memory_Type_Index;
+
+   VK_CHECK(vkAllocateMemory(VK->Device, &Vertex_Allocate_Info, 0, Buffer_Memory));
+   VK_CHECK(vkBindBufferMemory(VK->Device, *Buffer, *Buffer_Memory, 0));
+}
+
+static void Copy_Vulkan_Buffer(vulkan_context *VK, VkBuffer Destination, VkBuffer Source, VkDeviceSize Size)
+{
+   VkCommandBufferAllocateInfo Allocate_Info = {0};
+   Allocate_Info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+   Allocate_Info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+   Allocate_Info.commandPool = VK->Command_Pool;
+   Allocate_Info.commandBufferCount = 1;
+
+   VkCommandBuffer Command_Buffer;
+   VK_CHECK(vkAllocateCommandBuffers(VK->Device, &Allocate_Info, &Command_Buffer));
+
+   VkCommandBufferBeginInfo Begin_Info = {0};
+   Begin_Info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+   Begin_Info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+   VK_CHECK(vkBeginCommandBuffer(Command_Buffer, &Begin_Info));
+   {
+      VkBufferCopy Copy_Region = {0};
+      Copy_Region.srcOffset = 0;
+      Copy_Region.dstOffset = 0;
+      Copy_Region.size = Size;
+      vkCmdCopyBuffer(Command_Buffer, Source, Destination, 1, &Copy_Region);
+   }
+   vkEndCommandBuffer(Command_Buffer);
+
+   VkSubmitInfo Submit_Info = {0};
+   Submit_Info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+   Submit_Info.commandBufferCount = 1;
+   Submit_Info.pCommandBuffers = &Command_Buffer;
+
+   vkQueueSubmit(VK->Graphics_Queue, 1, &Submit_Info, VK_NULL_HANDLE);
+   vkQueueWaitIdle(VK->Graphics_Queue);
+
+   vkFreeCommandBuffers(VK->Device, VK->Command_Pool, 1, &Command_Buffer);
 }
 
 static INITIALIZE_VULKAN(Initialize_Vulkan)
@@ -599,54 +668,6 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
 
    VK_CHECK(vkCreateGraphicsPipelines(VK->Device, VK_NULL_HANDLE, 1, &Pipeline_Info, 0, &VK->Graphics_Pipeline));
 
-   // NOTE: Create vertex buffer.
-   VkBufferCreateInfo Vertex_Buffer_Info = {0};
-   Vertex_Buffer_Info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-   Vertex_Buffer_Info.size = sizeof(Vertices);
-   Vertex_Buffer_Info.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-   Vertex_Buffer_Info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-   VK_CHECK(vkCreateBuffer(VK->Device, &Vertex_Buffer_Info, 0, &VK->Vertex_Buffer));
-
-   VkMemoryRequirements Memory_Requirements;
-   vkGetBufferMemoryRequirements(VK->Device, VK->Vertex_Buffer, &Memory_Requirements);
-
-   VkPhysicalDeviceMemoryProperties Memory_Properties;
-   vkGetPhysicalDeviceMemoryProperties(VK->Physical_Device, &Memory_Properties);
-
-   u32 Required_Properties = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-   u32 Memory_Type_Index = 0;
-   u32 Memory_Type_Found = false;
-
-   for(u32 Type_Index = 0; Type_Index < Memory_Properties.memoryTypeCount; ++Type_Index)
-   {
-      VkMemoryType *Type = Memory_Properties.memoryTypes + Type_Index;
-
-      u32 Type_Supported = Memory_Requirements.memoryTypeBits & (1 << Type_Index);
-      u32 Properties_Supported = (Type->propertyFlags & Required_Properties) == Required_Properties;
-
-      if(Type_Supported && Properties_Supported)
-      {
-         Memory_Type_Index = Type_Index;
-         Memory_Type_Found = true;
-         break;
-      }
-   }
-   Assert(Memory_Type_Found);
-
-   VkMemoryAllocateInfo Vertex_Allocate_Info = {0};
-   Vertex_Allocate_Info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-   Vertex_Allocate_Info.allocationSize = Memory_Requirements.size;
-   Vertex_Allocate_Info.memoryTypeIndex = Memory_Type_Index;
-
-   VK_CHECK(vkAllocateMemory(VK->Device, &Vertex_Allocate_Info, 0, &VK->Vertex_Buffer_Memory));
-   VK_CHECK(vkBindBufferMemory(VK->Device, VK->Vertex_Buffer, VK->Vertex_Buffer_Memory, 0));
-
-   void *Vertex_Data;
-   VK_CHECK(vkMapMemory(VK->Device, VK->Vertex_Buffer_Memory, 0, Vertex_Buffer_Info.size, 0, &Vertex_Data));
-   memcpy(Vertex_Data, Vertices, Vertex_Buffer_Info.size);
-   vkUnmapMemory(VK->Device, VK->Vertex_Buffer_Memory);
-
    // NOTE: Create command buffers.
    VkCommandPoolCreateInfo Pool_Info = {0};
    Pool_Info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
@@ -662,6 +683,29 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
    Allocate_Info.commandBufferCount = Array_Count(VK->Command_Buffers);
 
    VK_CHECK(vkAllocateCommandBuffers(VK->Device, &Allocate_Info, VK->Command_Buffers));
+
+   // NOTE: Create vertex buffer.
+   size Vertex_Buffer_Size = sizeof(Vertices);
+
+   VkBuffer Staging_Buffer;
+   VkDeviceMemory Staging_Buffer_Memory;
+   VkBufferUsageFlags Staging_Buffer_Usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+   VkMemoryPropertyFlags Staging_Buffer_Properties = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+   Create_Vulkan_Buffer(VK, &Staging_Buffer, &Staging_Buffer_Memory, Vertex_Buffer_Size, Staging_Buffer_Usage, Staging_Buffer_Properties);
+
+   void *Vertex_Data;
+   VK_CHECK(vkMapMemory(VK->Device, Staging_Buffer_Memory, 0, Vertex_Buffer_Size, 0, &Vertex_Data));
+   memcpy(Vertex_Data, Vertices, Vertex_Buffer_Size);
+   vkUnmapMemory(VK->Device, Staging_Buffer_Memory);
+
+   VkBufferUsageFlags Vertex_Buffer_Usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT|VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+   VkMemoryPropertyFlags Vertex_Buffer_Properties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+   Create_Vulkan_Buffer(VK, &VK->Vertex_Buffer, &VK->Vertex_Buffer_Memory, Vertex_Buffer_Size, Vertex_Buffer_Usage, Vertex_Buffer_Properties);
+
+   Copy_Vulkan_Buffer(VK, VK->Vertex_Buffer, Staging_Buffer, Vertex_Buffer_Size);
+
+   vkDestroyBuffer(VK->Device, Staging_Buffer, 0);
+   vkFreeMemory(VK->Device, Staging_Buffer_Memory, 0);
 
    // NOTE: Configure synchronization.
    for(int Frame_Index = 0; Frame_Index < MAX_FRAMES_IN_FLIGHT; ++Frame_Index)
