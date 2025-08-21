@@ -26,16 +26,7 @@ typedef uint64_t u64;
 #include <stddef.h>
 typedef ptrdiff_t size;
 
-typedef struct {
-   float X;
-   float Y;
-} vec2;
-
-typedef struct {
-   float X;
-   float Y;
-   float Z;
-} vec3;
+#include "math.h"
 
 typedef struct {
    size Length;

@@ -1,5 +1,5 @@
 CFLAGS = -g3 -Wall -Wextra -DDEBUG -Wno-unused-function -Wno-unused-variable -Wno-unused-parameter -Wno-unused-but-set-variable
-LDLIBS = -lvulkan
+LDLIBS = -lvulkan -lm
 
 # NOTE: For Wayland code generation:
 WL_SCANNER   = $$(pkg-config wayland-scanner --variable=wayland_scanner)

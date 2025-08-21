@@ -31,11 +31,19 @@ typedef struct {
    VkPipelineLayout Pipeline_Layout;
    VkPipeline Graphics_Pipeline;
 
+   VkDescriptorSetLayout Descriptor_Set_Layout;
+   VkDescriptorPool Descriptor_Pool;
+   VkDescriptorSet Descriptor_Sets[MAX_FRAMES_IN_FLIGHT];
+
    VkBuffer Vertex_Buffer;
    VkDeviceMemory Vertex_Buffer_Memory;
 
    VkBuffer Index_Buffer;
    VkDeviceMemory Index_Buffer_Memory;
+
+   VkBuffer Uniform_Buffers[MAX_FRAMES_IN_FLIGHT];
+   VkDeviceMemory Uniform_Buffer_Memories[MAX_FRAMES_IN_FLIGHT];
+   void *Mapped_Uniform_Buffers[MAX_FRAMES_IN_FLIGHT];
 
    VkCommandPool Command_Pool;
    VkCommandBuffer Command_Buffers[MAX_FRAMES_IN_FLIGHT];

@@ -1,22 +1,28 @@
 /* (c) copyright 2025 Lawrence D. Kern /////////////////////////////////////// */
 
 typedef struct {
-   vec2 Position;
+   vec3 Position;
    vec3 Color;
 } vertex;
 
 static vertex Vertices[] =
 {
-   {{-0.5f, -0.5f}, {1.0f, 1.0f, 0.0f}},
-   {{ 0.5f, -0.5f}, {0.0f, 1.0f, 1.0f}},
-   {{ 0.5f,  0.5f}, {1.0f, 1.0f, 0.0f}},
-   {{-0.5f,  0.5f}, {1.0f, 0.0f, 1.0f}},
+   {{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}},
+   {{ 0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}},
+   {{ 0.5f,  0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}},
+   {{-0.5f,  0.5f, 0.0f}, {0.0f, 1.0f, 1.0f}},
 };
 
 static u16 Indices[] =
 {
-   0, 1, 2, 2, 3, 0,
+   0, 2, 1, 2, 0, 3,
 };
+
+typedef struct {
+   mat4 Model;
+   mat4 View;
+   mat4 Projection;
+} uniform_buffer_object;
 
 static bool Vulkan_Extensions_Supported(VkExtensionProperties *Extensions, u32 Extension_Count, const char **Required_Names, u32 Required_Count)
 {
@@ -27,7 +33,7 @@ static bool Vulkan_Extensions_Supported(VkExtensionProperties *Extensions, u32 E
       bool Found = false;
       for(u32 Available_Index = 0; Available_Index < Extension_Count; ++Available_Index)
       {
-         if(strcmp(Required_Name, Extensions[Available_Index].extensionName) == 0)
+         if(Strings_Are_Equal(Required_Name, Extensions[Available_Index].extensionName))
          {
             Found = true;
             break;
@@ -651,11 +657,104 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
    Blend_Info.blendConstants[2] = 0.0f;
    Blend_Info.blendConstants[3] = 0.0f;
 
+   // NOTE: Create command buffers.
+   VkCommandPoolCreateInfo Pool_Info = {0};
+   Pool_Info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+   Pool_Info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+   Pool_Info.queueFamilyIndex = VK->Graphics_Queue_Family_Index;
+
+   VK_CHECK(vkCreateCommandPool(VK->Device, &Pool_Info, 0, &VK->Command_Pool));
+
+   VkCommandBufferAllocateInfo Allocate_Info = {0};
+   Allocate_Info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+   Allocate_Info.commandPool = VK->Command_Pool;
+   Allocate_Info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+   Allocate_Info.commandBufferCount = Array_Count(VK->Command_Buffers);
+
+   VK_CHECK(vkAllocateCommandBuffers(VK->Device, &Allocate_Info, VK->Command_Buffers));
+
+   // NOTE: Create buffers.
+   Create_Vulkan_Vertex_Buffer(VK, Vertices, sizeof(Vertices));
+   Create_Vulkan_Index_Buffer(VK, Indices, sizeof(Indices));
+   for(int Frame_Index = 0; Frame_Index < MAX_FRAMES_IN_FLIGHT; ++Frame_Index)
+   {
+      VkBuffer *Buffer = VK->Uniform_Buffers + Frame_Index;
+      VkDeviceMemory *Memory = VK->Uniform_Buffer_Memories + Frame_Index;
+      size Size = sizeof(uniform_buffer_object);
+      VkBufferUsageFlags Usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+      VkMemoryPropertyFlags Properties = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+      Create_Vulkan_Buffer(VK, Buffer, Memory, Size, Usage, Properties);
+
+      void *Mapped = VK->Mapped_Uniform_Buffers + Frame_Index;
+      VK_CHECK(vkMapMemory(VK->Device, *Memory, 0, Size, 0, Mapped));
+   }
+
+   // NOTE: Create descriptor set layout.
+   VkDescriptorSetLayoutBinding UBO_Layout_Binding = {0};
+   UBO_Layout_Binding.binding = 0;
+   UBO_Layout_Binding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+   UBO_Layout_Binding.descriptorCount = 1;
+   UBO_Layout_Binding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+   UBO_Layout_Binding.pImmutableSamplers = 0;
+
+   VkDescriptorSetLayoutCreateInfo Descriptor_Layout_Info = {0};
+   Descriptor_Layout_Info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+   Descriptor_Layout_Info.bindingCount = 1;
+   Descriptor_Layout_Info.pBindings = &UBO_Layout_Binding;
+   VK_CHECK(vkCreateDescriptorSetLayout(VK->Device, &Descriptor_Layout_Info, 0, &VK->Descriptor_Set_Layout));
+
+   VkDescriptorPoolSize Descriptor_Pool_Size = {0};
+   Descriptor_Pool_Size.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+   Descriptor_Pool_Size.descriptorCount = MAX_FRAMES_IN_FLIGHT;
+
+   VkDescriptorPoolCreateInfo Descriptor_Pool_Info = {0};
+   Descriptor_Pool_Info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+   Descriptor_Pool_Info.poolSizeCount = 1;
+   Descriptor_Pool_Info.pPoolSizes = &Descriptor_Pool_Size;
+   Descriptor_Pool_Info.maxSets = MAX_FRAMES_IN_FLIGHT;
+
+   VK_CHECK(vkCreateDescriptorPool(VK->Device, &Descriptor_Pool_Info, 0, &VK->Descriptor_Pool));
+
+   VkDescriptorSetLayout Descriptor_Set_Layouts[MAX_FRAMES_IN_FLIGHT];
+   for(int Frame_Index = 0; Frame_Index < MAX_FRAMES_IN_FLIGHT; ++Frame_Index)
+   {
+      Descriptor_Set_Layouts[Frame_Index] = VK->Descriptor_Set_Layout;
+   }
+   VkDescriptorSetAllocateInfo Descriptor_Set_Info = {0};
+   Descriptor_Set_Info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+   Descriptor_Set_Info.descriptorPool = VK->Descriptor_Pool;
+   Descriptor_Set_Info.descriptorSetCount = MAX_FRAMES_IN_FLIGHT;
+   Descriptor_Set_Info.pSetLayouts = Descriptor_Set_Layouts;
+
+   VK_CHECK(vkAllocateDescriptorSets(VK->Device, &Descriptor_Set_Info, VK->Descriptor_Sets));
+
+   // NOTE: Create descriptor sets.
+   for(int Frame_Index = 0; Frame_Index < MAX_FRAMES_IN_FLIGHT; ++Frame_Index)
+   {
+      VkDescriptorBufferInfo Buffer_Info = {0};
+      Buffer_Info.buffer = VK->Uniform_Buffers[Frame_Index];
+      Buffer_Info.offset = 0;
+      Buffer_Info.range = sizeof(uniform_buffer_object);
+
+      VkWriteDescriptorSet Descriptor_Write = {0};
+      Descriptor_Write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+      Descriptor_Write.dstSet = VK->Descriptor_Sets[Frame_Index];
+      Descriptor_Write.dstBinding = 0;
+      Descriptor_Write.dstArrayElement = 0;
+      Descriptor_Write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+      Descriptor_Write.descriptorCount = 1;
+      Descriptor_Write.pBufferInfo = &Buffer_Info;
+      Descriptor_Write.pImageInfo = 0;
+      Descriptor_Write.pTexelBufferView = 0;
+
+      vkUpdateDescriptorSets(VK->Device, 1, &Descriptor_Write, 0, 0);
+   }
+
    // NOTE: Create pipeline layout.
    VkPipelineLayoutCreateInfo Layout_Info = {0};
    Layout_Info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-   Layout_Info.setLayoutCount = 0;
-   Layout_Info.pSetLayouts = 0;
+   Layout_Info.setLayoutCount = 1;
+   Layout_Info.pSetLayouts = &VK->Descriptor_Set_Layout;
    Layout_Info.pushConstantRangeCount = 0;
    Layout_Info.pPushConstantRanges = 0;
 
@@ -719,26 +818,6 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
    Pipeline_Info.basePipelineIndex = -1;
 
    VK_CHECK(vkCreateGraphicsPipelines(VK->Device, VK_NULL_HANDLE, 1, &Pipeline_Info, 0, &VK->Graphics_Pipeline));
-
-   // NOTE: Create command buffers.
-   VkCommandPoolCreateInfo Pool_Info = {0};
-   Pool_Info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-   Pool_Info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-   Pool_Info.queueFamilyIndex = VK->Graphics_Queue_Family_Index;
-
-   VK_CHECK(vkCreateCommandPool(VK->Device, &Pool_Info, 0, &VK->Command_Pool));
-
-   VkCommandBufferAllocateInfo Allocate_Info = {0};
-   Allocate_Info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-   Allocate_Info.commandPool = VK->Command_Pool;
-   Allocate_Info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-   Allocate_Info.commandBufferCount = Array_Count(VK->Command_Buffers);
-
-   VK_CHECK(vkAllocateCommandBuffers(VK->Device, &Allocate_Info, VK->Command_Buffers));
-
-   // NOTE: Create buffers.
-   Create_Vulkan_Vertex_Buffer(VK, Vertices, sizeof(Vertices));
-   Create_Vulkan_Index_Buffer(VK, Indices, sizeof(Indices));
 
    // NOTE: Configure synchronization.
    for(int Frame_Index = 0; Frame_Index < MAX_FRAMES_IN_FLIGHT; ++Frame_Index)
@@ -819,10 +898,27 @@ static RENDER_WITH_VULKAN(Render_With_Vulkan)
          Scissor.extent = VK->Swapchain_Extent;
          vkCmdSetScissor(Command_Buffer, 0, 1, &Scissor);
 
+         vkCmdBindDescriptorSets(Command_Buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, VK->Pipeline_Layout, 0, 1, VK->Descriptor_Sets + VK->Frame_Index, 0, 0);
+
          vkCmdDrawIndexed(Command_Buffer, Array_Count(Indices), 1, 0, 0, 0);
       }
       vkCmdEndRenderPass(Command_Buffer);
       VK_CHECK(vkEndCommandBuffer(Command_Buffer));
+
+      // NOTE: Update uniforms.
+      static float Delta;
+      vec3 Eye = {2, 2, 2};
+      vec3 Target = {0, 0, 0};
+
+      uniform_buffer_object UBO = {0};
+      UBO.Model = Rotate_Z(Cosine(Delta));
+      UBO.View = Look_At(Eye, Target);
+      UBO.Projection = Perspective(VK->Swapchain_Extent.width, VK->Swapchain_Extent.height, 0.1f, 100.0f);
+
+      memcpy(VK->Mapped_Uniform_Buffers[VK->Frame_Index], &UBO, sizeof(UBO));
+
+      Delta += 0.000016;
+      if(Delta >= 1.0f) Delta -= 1.0f;
 
       // NOTE: Submit command buffer.
       VkSubmitInfo Submit_Info = {0};
@@ -885,6 +981,12 @@ static DESTROY_VULKAN(Destroy_Vulkan)
    Destroy_Vulkan_Swapchain(VK);
    vkDestroyCommandPool(VK->Device, VK->Command_Pool, 0);
 
+   for(int Frame_Index = 0; Frame_Index < MAX_FRAMES_IN_FLIGHT; ++Frame_Index)
+   {
+      vkDestroyBuffer(VK->Device, VK->Uniform_Buffers[Frame_Index], 0);
+      vkFreeMemory(VK->Device, VK->Uniform_Buffer_Memories[Frame_Index], 0);
+   }
+
    vkDestroyBuffer(VK->Device, VK->Index_Buffer, 0);
    vkFreeMemory(VK->Device, VK->Index_Buffer_Memory, 0);
 
@@ -893,6 +995,8 @@ static DESTROY_VULKAN(Destroy_Vulkan)
 
    vkDestroyPipeline(VK->Device, VK->Graphics_Pipeline, 0);
    vkDestroyPipelineLayout(VK->Device, VK->Pipeline_Layout, 0);
+   vkDestroyDescriptorPool(VK->Device, VK->Descriptor_Pool, 0);
+   vkDestroyDescriptorSetLayout(VK->Device, VK->Descriptor_Set_Layout, 0);
    vkDestroyRenderPass(VK->Device, VK->Render_Pass, 0);
    vkDestroyShaderModule(VK->Device, VK->Fragment_Shader, 0);
    vkDestroyShaderModule(VK->Device, VK->Vertex_Shader, 0);
