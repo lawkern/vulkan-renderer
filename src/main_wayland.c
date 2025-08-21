@@ -10,11 +10,12 @@
 #define DEFAULT_RESOLUTION_WIDTH 640
 #define DEFAULT_RESOLUTION_HEIGHT 480
 
-#include <unistd.h>
 #include <fcntl.h>
+#include <linux/input-event-codes.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
-#include <linux/input-event-codes.h>
+#include <time.h>
+#include <unistd.h>
 
 #include <stdbool.h>
 #include <stdio.h>
@@ -45,6 +46,7 @@ typedef struct {
    int Window_Height;
    int Previous_Window_Width;
    int Previous_Window_Height;
+   u64 Frame_Count;
    bool Running;
    bool Alt_Pressed;
 
@@ -112,41 +114,11 @@ static READ_ENTIRE_FILE(Read_Entire_File)
 
 static GET_WINDOW_DIMENSIONS(Get_Window_Dimensions)
 {
-   wayland_context *Wayland = (wayland_context *)Platform_Context;
+   wayland_context *Wayland = Platform_Context;
 
    *Width = Wayland->Window_Width;
    *Height = Wayland->Window_Height;
 }
-
-// NOTE: Configure the global registry and its callbacks.
-static void Global_Registry(void *Data, struct wl_registry *Registry, u32 ID, const char *Interface, u32 Version)
-{
-   wayland_context *Wayland = Data;
-   if(Strings_Are_Equal(Interface, wl_compositor_interface.name))
-   {
-      Wayland->Compositor = wl_registry_bind(Registry, ID, &wl_compositor_interface, 4);
-   }
-   else if(Strings_Are_Equal(Interface, xdg_wm_base_interface.name))
-   {
-      Wayland->Desktop_Base = wl_registry_bind(Registry, ID, &xdg_wm_base_interface, 1);
-   }
-   else if(Strings_Are_Equal(Interface, zxdg_decoration_manager_v1_interface.name))
-   {
-      Wayland->Decoration_Manager = wl_registry_bind(Registry, ID, &zxdg_decoration_manager_v1_interface, 1);
-   }
-   else if(Strings_Are_Equal(Interface, wl_seat_interface.name))
-   {
-      Wayland->Seat = wl_registry_bind(Registry, ID, &wl_seat_interface, 1);
-   }
-}
-static void Remove_Global_Registry(void *Data, struct wl_registry *Registry, u32 ID)
-{
-}
-static const struct wl_registry_listener Registry_Listener =
-{
-   .global = Global_Registry,
-   .global_remove = Remove_Global_Registry,
-};
 
 // NOTE: Configure desktop base callbacks.
 static void Ping_Desktop_Base(void *Data, struct xdg_wm_base *Base, u32 Serial)
@@ -279,6 +251,47 @@ static const struct wl_keyboard_listener Keyboard_Listener =
    .repeat_info = Repeat_Keyboard,
 };
 
+// NOTE: Configure the global registry by adding the callbacks we defined above.
+static void Global_Registry(void *Data, struct wl_registry *Registry, u32 ID, const char *Interface, u32 Version)
+{
+   wayland_context *Wayland = Data;
+   if(Strings_Are_Equal(Interface, wl_compositor_interface.name))
+   {
+      Wayland->Compositor = wl_registry_bind(Registry, ID, &wl_compositor_interface, 4);
+   }
+   else if(Strings_Are_Equal(Interface, xdg_wm_base_interface.name))
+   {
+      Wayland->Desktop_Base = wl_registry_bind(Registry, ID, &xdg_wm_base_interface, 1);
+   }
+   else if(Strings_Are_Equal(Interface, zxdg_decoration_manager_v1_interface.name))
+   {
+      Wayland->Decoration_Manager = wl_registry_bind(Registry, ID, &zxdg_decoration_manager_v1_interface, 1);
+   }
+   else if(Strings_Are_Equal(Interface, wl_seat_interface.name))
+   {
+      Wayland->Seat = wl_registry_bind(Registry, ID, &wl_seat_interface, 1);
+      if(Wayland->Seat)
+      {
+         // NOTE: It's not the end of the world if we don't have keyboard
+         // access.
+         Wayland->Keyboard = wl_seat_get_keyboard(Wayland->Seat);
+         if(Wayland->Keyboard)
+         {
+            wl_keyboard_add_listener(Wayland->Keyboard, &Keyboard_Listener, Wayland);
+         }
+      }
+   }
+}
+static void Remove_Global_Registry(void *Data, struct wl_registry *Registry, u32 ID)
+{
+   // ...
+}
+static const struct wl_registry_listener Registry_Listener =
+{
+   .global = Global_Registry,
+   .global_remove = Remove_Global_Registry,
+};
+
 static void Destroy_Wayland(wayland_context *Wayland)
 {
    // NOTE: Destroy decorations.
@@ -341,19 +354,6 @@ static void Initialize_Wayland(wayland_context *Wayland, int Width, int Height)
 
       if(Wayland->Compositor && Wayland->Desktop_Base)
       {
-         // NOTE: It's not the end of the world if we don't have keyboard
-         // access. I'm still undecided on how much of this kind of
-         // initialization should happen in the callbacks vs. procedurally
-         // here. Not sure which is more "idiomatic Wayland", or if I care.
-         if(Wayland->Seat)
-         {
-            Wayland->Keyboard = wl_seat_get_keyboard(Wayland->Seat);
-            if(Wayland->Keyboard)
-            {
-               wl_keyboard_add_listener(Wayland->Keyboard, &Keyboard_Listener, Wayland);
-            }
-         }
-
          xdg_wm_base_add_listener(Wayland->Desktop_Base, &Desktop_Base_Listener, Wayland);
 
          Wayland->Surface = wl_compositor_create_surface(Wayland->Compositor);
@@ -368,7 +368,7 @@ static void Initialize_Wayland(wayland_context *Wayland, int Width, int Height)
                if(Wayland->Desktop_Toplevel)
                {
                   xdg_toplevel_add_listener(Wayland->Desktop_Toplevel, &Desktop_Toplevel_Listener, Wayland);
-                  xdg_toplevel_set_title(Wayland->Desktop_Toplevel, "Vulkan Window");
+                  xdg_toplevel_set_title(Wayland->Desktop_Toplevel, "Vulkan Window (Wayland)");
 
                   // NOTE: Explicitly setting the min and max sizes to the same
                   // values is an indirect way of requesting a floating window
@@ -422,13 +422,34 @@ int main(void)
    Initialize_Wayland(&Wayland, DEFAULT_RESOLUTION_WIDTH, DEFAULT_RESOLUTION_HEIGHT);
    Initialize_Vulkan(&Wayland.VK, &Wayland);
 
+   struct timespec Frame_Start;
+   clock_gettime(CLOCK_MONOTONIC, &Frame_Start);
+
+   // NOTE: We're actually relying on vsync to determine frame time, the default
+   // value here is just so we have a reasonable value on the first iteration
+   // without needing to jump through multiple callback hoops to find the
+   // correct monitor refresh rate.
+   float Frame_Seconds_Elapsed = 1.0f / 60.0f;
+
    while(Wayland.Running)
    {
       wl_display_dispatch_pending(Wayland.Display);
 
-      Render_With_Vulkan(&Wayland.VK);
+      Render_With_Vulkan(&Wayland.VK, Frame_Seconds_Elapsed);
 
-      wl_display_flush(Wayland.Display);
+      struct timespec Frame_End;
+      clock_gettime(CLOCK_MONOTONIC, &Frame_End);
+
+      Frame_Seconds_Elapsed = (Frame_End.tv_sec - Frame_Start.tv_sec) + (1e-9 * (Frame_End.tv_nsec - Frame_Start.tv_nsec));
+      Frame_Start = Frame_End;
+
+#if DEBUG
+      if((Wayland.Frame_Count % 60) == 0)
+      {
+         printf("Frame Time: %fms\n", Frame_Seconds_Elapsed * 1000.0f);
+      }
+#endif
+      Wayland.Frame_Count++;
    }
 
    Destroy_Vulkan(&Wayland.VK);

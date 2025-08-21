@@ -1,38 +1,6 @@
 /* (c) copyright 2025 Lawrence D. Kern /////////////////////////////////////// */
 
-typedef struct {
-   vec3 Position;
-   vec3 Color;
-} vertex;
-
-static vertex Vertices[] =
-{
-   {{ 1.0f,  1.0f,  1.0f}, {1.0f, 1.0f, 0}},
-   {{ 1.0f, -1.0f,  1.0f}, {0, 1.0f, 1.0f}},
-   {{-1.0f, -1.0f,  1.0f}, {1.0f, 0, 1.0f}},
-   {{-1.0f,  1.0f,  1.0f}, {1.0f, 1.0f, 0}},
-
-   {{ 1.0f,  1.0f, -1.0f}, {1.0f, 1.0f, 0}},
-   {{ 1.0f, -1.0f, -1.0f}, {0, 1.0f, 1.0f}},
-   {{-1.0f, -1.0f, -1.0f}, {1.0f, 0, 1.0f}},
-   {{-1.0f,  1.0f, -1.0f}, {1.0f, 1.0f, 0}},
-};
-
-static u16 Indices[] =
-{
-   0, 1, 3, 1, 2, 3,
-   3, 2, 6, 3, 6, 7,
-   2, 1, 5, 2, 5, 6,
-   1, 0, 4, 1, 4, 5,
-   0, 7, 4, 0, 3, 7,
-   4, 6, 5, 4, 7, 6,
-};
-
-typedef struct {
-   mat4 Model;
-   mat4 View;
-   mat4 Projection;
-} uniform_buffer_object;
+#include "data.h"
 
 static bool Vulkan_Extensions_Supported(VkExtensionProperties *Extensions, u32 Extension_Count, const char **Required_Names, u32 Required_Count)
 {
@@ -133,11 +101,13 @@ static void Create_Vulkan_Swapchain(vulkan_context *VK)
    for(u32 Mode_Index = 0; Mode_Index < Present_Mode_Count; ++Mode_Index)
    {
       VkPresentModeKHR Option = Present_Modes[Mode_Index];
+#if 0
       if(Option == VK_PRESENT_MODE_MAILBOX_KHR)
       {
          Desired_Present_Mode = Option;
          Desired_Present_Mode_Found = true;
       }
+#endif
    }
    // Assert(Desired_Present_Mode_Found);
 
@@ -245,6 +215,33 @@ static void Recreate_Vulkan_Swapchain(vulkan_context *VK)
    Create_Vulkan_Framebuffers(VK);
 }
 
+static u32 Get_Memory_Type(vulkan_context *VK, u32 Memory_Type_Bits, VkMemoryPropertyFlags Properties)
+{
+   u32 Memory_Type_Index = 0;
+   u32 Memory_Type_Found = false;
+
+   VkPhysicalDeviceMemoryProperties Memory_Properties;
+   vkGetPhysicalDeviceMemoryProperties(VK->Physical_Device, &Memory_Properties);
+
+   for(u32 Type_Index = 0; Type_Index < Memory_Properties.memoryTypeCount; ++Type_Index)
+   {
+      VkMemoryType *Type = Memory_Properties.memoryTypes + Type_Index;
+
+      u32 Type_Supported = Memory_Type_Bits & (1 << Type_Index);
+      u32 Properties_Supported = (Type->propertyFlags & Properties) == Properties;
+
+      if(Type_Supported && Properties_Supported)
+      {
+         Memory_Type_Index = Type_Index;
+         Memory_Type_Found = true;
+         break;
+      }
+   }
+   Assert(Memory_Type_Found);
+
+   return(Memory_Type_Index);
+}
+
 static void Create_Vulkan_Buffer(vulkan_context *VK, VkBuffer *Buffer, VkDeviceMemory *Buffer_Memory, size Size, VkBufferUsageFlags Usage, VkMemoryPropertyFlags Properties)
 {
    VkBufferCreateInfo Buffer_Info = {0};
@@ -258,37 +255,16 @@ static void Create_Vulkan_Buffer(vulkan_context *VK, VkBuffer *Buffer, VkDeviceM
    VkMemoryRequirements Memory_Requirements;
    vkGetBufferMemoryRequirements(VK->Device, *Buffer, &Memory_Requirements);
 
-   VkPhysicalDeviceMemoryProperties Memory_Properties;
-   vkGetPhysicalDeviceMemoryProperties(VK->Physical_Device, &Memory_Properties);
-
-   u32 Memory_Type_Index = 0;
-   u32 Memory_Type_Found = false;
-   for(u32 Type_Index = 0; Type_Index < Memory_Properties.memoryTypeCount; ++Type_Index)
-   {
-      VkMemoryType *Type = Memory_Properties.memoryTypes + Type_Index;
-
-      u32 Type_Supported = Memory_Requirements.memoryTypeBits & (1 << Type_Index);
-      u32 Properties_Supported = (Type->propertyFlags & Properties) == Properties;
-
-      if(Type_Supported && Properties_Supported)
-      {
-         Memory_Type_Index = Type_Index;
-         Memory_Type_Found = true;
-         break;
-      }
-   }
-   Assert(Memory_Type_Found);
-
    VkMemoryAllocateInfo Vertex_Allocate_Info = {0};
    Vertex_Allocate_Info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
    Vertex_Allocate_Info.allocationSize = Memory_Requirements.size;
-   Vertex_Allocate_Info.memoryTypeIndex = Memory_Type_Index;
+   Vertex_Allocate_Info.memoryTypeIndex = Get_Memory_Type(VK, Memory_Requirements.memoryTypeBits, Properties);
 
    VK_CHECK(vkAllocateMemory(VK->Device, &Vertex_Allocate_Info, 0, Buffer_Memory));
    VK_CHECK(vkBindBufferMemory(VK->Device, *Buffer, *Buffer_Memory, 0));
 }
 
-static void Copy_Vulkan_Buffer(vulkan_context *VK, VkBuffer Destination, VkBuffer Source, VkDeviceSize Size)
+static VkCommandBuffer Begin_Onetime_Vulkan_Commands(vulkan_context *VK)
 {
    VkCommandBufferAllocateInfo Allocate_Info = {0};
    Allocate_Info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -304,13 +280,12 @@ static void Copy_Vulkan_Buffer(vulkan_context *VK, VkBuffer Destination, VkBuffe
    Begin_Info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
    VK_CHECK(vkBeginCommandBuffer(Command_Buffer, &Begin_Info));
-   {
-      VkBufferCopy Copy_Region = {0};
-      Copy_Region.srcOffset = 0;
-      Copy_Region.dstOffset = 0;
-      Copy_Region.size = Size;
-      vkCmdCopyBuffer(Command_Buffer, Source, Destination, 1, &Copy_Region);
-   }
+
+   return(Command_Buffer);
+}
+
+static void End_Onetime_Vulkan_Commands(vulkan_context *VK, VkCommandBuffer Command_Buffer)
+{
    vkEndCommandBuffer(Command_Buffer);
 
    VkSubmitInfo Submit_Info = {0};
@@ -324,6 +299,19 @@ static void Copy_Vulkan_Buffer(vulkan_context *VK, VkBuffer Destination, VkBuffe
    vkFreeCommandBuffers(VK->Device, VK->Command_Pool, 1, &Command_Buffer);
 }
 
+static void Copy_Vulkan_Buffer(vulkan_context *VK, VkBuffer Destination, VkBuffer Source, VkDeviceSize Size)
+{
+   VkCommandBuffer Command_Buffer = Begin_Onetime_Vulkan_Commands(VK);
+   {
+      VkBufferCopy Copy_Region = {0};
+      Copy_Region.srcOffset = 0;
+      Copy_Region.dstOffset = 0;
+      Copy_Region.size = Size;
+      vkCmdCopyBuffer(Command_Buffer, Source, Destination, 1, &Copy_Region);
+   }
+   End_Onetime_Vulkan_Commands(VK, Command_Buffer);
+}
+
 static void Create_Vulkan_Vertex_Buffer(vulkan_context *VK, vertex *Vertices, size Size)
 {
    VkBuffer Staging_Buffer;
@@ -334,7 +322,7 @@ static void Create_Vulkan_Vertex_Buffer(vulkan_context *VK, vertex *Vertices, si
 
    void *Data;
    VK_CHECK(vkMapMemory(VK->Device, Staging_Buffer_Memory, 0, Size, 0, &Data));
-   memcpy(Data, Vertices, Size);
+   Copy_Memory(Data, Vertices, Size);
    vkUnmapMemory(VK->Device, Staging_Buffer_Memory);
 
    VkBufferUsageFlags Usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT|VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
@@ -357,7 +345,7 @@ static void Create_Vulkan_Index_Buffer(vulkan_context *VK, u16 *Indices, size Si
 
    void *Data;
    VK_CHECK(vkMapMemory(VK->Device, Staging_Buffer_Memory, 0, Size, 0, &Data));
-   memcpy(Data, Indices, Size);
+   Copy_Memory(Data, Indices, Size);
    vkUnmapMemory(VK->Device, Staging_Buffer_Memory);
 
    VkBufferUsageFlags Usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT|VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
@@ -365,6 +353,137 @@ static void Create_Vulkan_Index_Buffer(vulkan_context *VK, u16 *Indices, size Si
    Create_Vulkan_Buffer(VK, &VK->Index_Buffer, &VK->Index_Buffer_Memory, Size, Usage, Properties);
 
    Copy_Vulkan_Buffer(VK, VK->Index_Buffer, Staging_Buffer, Size);
+
+   vkDestroyBuffer(VK->Device, Staging_Buffer, 0);
+   vkFreeMemory(VK->Device, Staging_Buffer_Memory, 0);
+}
+
+static void Create_Vulkan_Image(vulkan_context *VK, VkImage *Image, VkDeviceMemory *Image_Memory, u32 Width, u32 Height, VkImageUsageFlags Usage, VkMemoryPropertyFlags Properties)
+{
+   VkImageCreateInfo Image_Info = {0};
+   Image_Info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+   Image_Info.imageType = VK_IMAGE_TYPE_2D;
+   Image_Info.extent.width = Width;
+   Image_Info.extent.height = Height;
+   Image_Info.extent.depth = 1;
+   Image_Info.mipLevels = 1;
+   Image_Info.arrayLayers = 1;
+   Image_Info.format = VK_FORMAT_R8G8B8A8_SRGB;
+   Image_Info.tiling = VK_IMAGE_TILING_OPTIMAL;
+   Image_Info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+   Image_Info.usage = Usage;
+   Image_Info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+   Image_Info.samples = VK_SAMPLE_COUNT_1_BIT;
+   Image_Info.flags = 0;
+
+   VK_CHECK(vkCreateImage(VK->Device, &Image_Info, 0, Image));
+
+   VkMemoryRequirements Memory_Requirements;
+   vkGetImageMemoryRequirements(VK->Device, *Image, &Memory_Requirements);
+
+   VkMemoryAllocateInfo Allocate_Info = {0};
+   Allocate_Info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+   Allocate_Info.allocationSize = Memory_Requirements.size;
+   Allocate_Info.memoryTypeIndex = Get_Memory_Type(VK, Memory_Requirements.memoryTypeBits, Properties);
+
+   VK_CHECK(vkAllocateMemory(VK->Device, &Allocate_Info, 0, Image_Memory));
+   VK_CHECK(vkBindImageMemory(VK->Device, *Image, *Image_Memory, 0));
+}
+
+static void Transition_Vulkan_Image_Layout(vulkan_context *VK, VkImage Image, VkFormat Format, VkImageLayout Old, VkImageLayout New)
+{
+   VkCommandBuffer Command_Buffer = Begin_Onetime_Vulkan_Commands(VK);
+   {
+      VkImageMemoryBarrier Barrier = {0};
+      Barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+      Barrier.oldLayout = Old;
+      Barrier.newLayout = New;
+      Barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      Barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      Barrier.image = Image;
+      Barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+      Barrier.subresourceRange.baseMipLevel = 0;
+      Barrier.subresourceRange.levelCount = 1;
+      Barrier.subresourceRange.baseArrayLayer = 0;
+      Barrier.subresourceRange.layerCount = 1;
+
+      VkPipelineStageFlags Source_Stage, Destination_Stage;
+      if(Old == VK_IMAGE_LAYOUT_UNDEFINED && New == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)
+      {
+         Barrier.srcAccessMask = 0;
+         Barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+
+         Source_Stage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+         Destination_Stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+      }
+      else if(Old == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && New == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+      {
+         Barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+         Barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+         Source_Stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+         Destination_Stage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+      }
+      else
+      {
+         // NOTE: Unsupported transition.
+         Assert(0);
+      }
+
+      vkCmdPipelineBarrier(Command_Buffer, Source_Stage, Destination_Stage, 0, 0, 0, 0, 0, 1, &Barrier);
+   }
+   End_Onetime_Vulkan_Commands(VK, Command_Buffer);
+}
+
+static void Copy_Vulkan_Buffer_To_Image(vulkan_context *VK, VkBuffer Buffer, VkImage Image, u32 Width, u32 Height)
+{
+   VkCommandBuffer Command_Buffer = Begin_Onetime_Vulkan_Commands(VK);
+   {
+      VkBufferImageCopy Region = {0};
+      Region.bufferOffset = 0;
+      Region.bufferRowLength = 0;
+      Region.bufferImageHeight = 0;
+
+      Region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+      Region.imageSubresource.mipLevel = 0;
+      Region.imageSubresource.baseArrayLayer = 0;
+      Region.imageSubresource.layerCount = 1;
+
+      Region.imageOffset.x = 0;
+      Region.imageOffset.y = 0;
+      Region.imageOffset.z = 0;
+
+      Region.imageExtent.width = Width;
+      Region.imageExtent.height = Height;
+      Region.imageExtent.depth = 1;
+
+      vkCmdCopyBufferToImage(Command_Buffer, Buffer, Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &Region);
+   }
+   End_Onetime_Vulkan_Commands(VK, Command_Buffer);
+}
+
+static void Create_Vulkan_Texture_Image(vulkan_context *VK)
+{
+   VkBuffer Staging_Buffer;
+   VkDeviceMemory Staging_Buffer_Memory;
+   size Size = Texture_Width * Texture_Height * sizeof(*Texture_Memory);
+
+   VkBufferUsageFlags Staging_Usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+   VkMemoryPropertyFlags Staging_Properties = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+   Create_Vulkan_Buffer(VK, &Staging_Buffer, &Staging_Buffer_Memory, Size, Staging_Usage, Staging_Properties);
+
+   void *Data;
+   VK_CHECK(vkMapMemory(VK->Device, Staging_Buffer_Memory, 0, Size, 0, &Data));
+   Copy_Memory(Data, Texture_Memory, Size);
+
+   VkImageUsageFlags Image_Usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT|VK_IMAGE_USAGE_SAMPLED_BIT;
+   VkMemoryPropertyFlags Image_Properties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+   Create_Vulkan_Image(VK, &VK->Texture_Image, &VK->Texture_Image_Memory, Texture_Width, Texture_Height, Image_Usage, Image_Properties);
+
+   VkFormat Format = VK_FORMAT_R8G8B8A8_SRGB;
+   Transition_Vulkan_Image_Layout(VK, VK->Texture_Image, Format, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+   Copy_Vulkan_Buffer_To_Image(VK, Staging_Buffer, VK->Texture_Image, Texture_Width, Texture_Height);
+   Transition_Vulkan_Image_Layout(VK, VK->Texture_Image, Format, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
    vkDestroyBuffer(VK->Device, Staging_Buffer, 0);
    vkFreeMemory(VK->Device, Staging_Buffer_Memory, 0);
@@ -699,6 +818,9 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
       VK_CHECK(vkMapMemory(VK->Device, *Memory, 0, Size, 0, Mapped));
    }
 
+   // NOTE: Create images.
+   Create_Vulkan_Texture_Image(VK);
+
    // NOTE: Create descriptor set layout.
    VkDescriptorSetLayoutBinding UBO_Layout_Binding = {0};
    UBO_Layout_Binding.binding = 0;
@@ -917,17 +1039,20 @@ static RENDER_WITH_VULKAN(Render_With_Vulkan)
 
       // NOTE: Update uniforms.
       static float Delta;
-      vec3 Eye = {5, 5, 5};
+      float S = Sine(Delta);
+      float C = Cosine(Delta);
+
+      vec3 Eye = {5.0f*S, 5.0f*C, 5.0f + 2.5f*S};
       vec3 Target = {0, 0, 0};
 
       uniform_buffer_object UBO = {0};
-      UBO.Model = Rotate_Y(Cosine(Delta));
+      UBO.Model = Identity(); // Rotate_Y(C);
       UBO.View = Look_At(Eye, Target);
       UBO.Projection = Perspective(VK->Swapchain_Extent.width, VK->Swapchain_Extent.height, 0.1f, 100.0f);
 
-      memcpy(VK->Mapped_Uniform_Buffers[VK->Frame_Index], &UBO, sizeof(UBO));
+      Copy_Memory(VK->Mapped_Uniform_Buffers[VK->Frame_Index], &UBO, sizeof(UBO));
 
-      Delta += 0.000016;
+      Delta += 0.5f * Frame_Seconds_Elapsed;
       if(Delta >= 1.0f) Delta -= 1.0f;
 
       // NOTE: Submit command buffer.
@@ -996,6 +1121,9 @@ static DESTROY_VULKAN(Destroy_Vulkan)
       vkDestroyBuffer(VK->Device, VK->Uniform_Buffers[Frame_Index], 0);
       vkFreeMemory(VK->Device, VK->Uniform_Buffer_Memories[Frame_Index], 0);
    }
+
+   vkDestroyImage(VK->Device, VK->Texture_Image, 0);
+   vkFreeMemory(VK->Device, VK->Texture_Image_Memory, 0);
 
    vkDestroyBuffer(VK->Device, VK->Index_Buffer, 0);
    vkFreeMemory(VK->Device, VK->Index_Buffer_Memory, 0);

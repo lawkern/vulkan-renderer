@@ -6,6 +6,17 @@
 #define MAX_FRAMES_IN_FLIGHT 2
 
 typedef struct {
+   vec3 Position;
+   vec3 Color;
+} vertex;
+
+typedef struct {
+   mat4 Model;
+   mat4 View;
+   mat4 Projection;
+} uniform_buffer_object;
+
+typedef struct {
    VkInstance Instance;
    VkPhysicalDevice Physical_Device;
    VkSurfaceKHR Surface;
@@ -40,6 +51,9 @@ typedef struct {
 
    VkBuffer Index_Buffer;
    VkDeviceMemory Index_Buffer_Memory;
+
+   VkImage Texture_Image;
+   VkDeviceMemory Texture_Image_Memory;
 
    VkBuffer Uniform_Buffers[MAX_FRAMES_IN_FLIGHT];
    VkDeviceMemory Uniform_Buffer_Memories[MAX_FRAMES_IN_FLIGHT];
@@ -80,7 +94,7 @@ typedef struct {
 #define INITIALIZE_VULKAN(Name) void Name(vulkan_context *VK, void *Platform_Context)
 static INITIALIZE_VULKAN(Initialize_Vulkan);
 
-#define RENDER_WITH_VULKAN(Name) void Name(vulkan_context *VK)
+#define RENDER_WITH_VULKAN(Name) void Name(vulkan_context *VK, float Frame_Seconds_Elapsed)
 static RENDER_WITH_VULKAN(Render_With_Vulkan);
 
 #define DESTROY_VULKAN(Name) void Name(vulkan_context *VK)
