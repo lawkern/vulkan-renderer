@@ -7,15 +7,25 @@ typedef struct {
 
 static vertex Vertices[] =
 {
-   {{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}},
-   {{ 0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}},
-   {{ 0.5f,  0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}},
-   {{-0.5f,  0.5f, 0.0f}, {0.0f, 1.0f, 1.0f}},
+   {{ 1.0f,  1.0f,  1.0f}, {1.0f, 1.0f, 0}},
+   {{ 1.0f, -1.0f,  1.0f}, {0, 1.0f, 1.0f}},
+   {{-1.0f, -1.0f,  1.0f}, {1.0f, 0, 1.0f}},
+   {{-1.0f,  1.0f,  1.0f}, {1.0f, 1.0f, 0}},
+
+   {{ 1.0f,  1.0f, -1.0f}, {1.0f, 1.0f, 0}},
+   {{ 1.0f, -1.0f, -1.0f}, {0, 1.0f, 1.0f}},
+   {{-1.0f, -1.0f, -1.0f}, {1.0f, 0, 1.0f}},
+   {{-1.0f,  1.0f, -1.0f}, {1.0f, 1.0f, 0}},
 };
 
 static u16 Indices[] =
 {
-   0, 2, 1, 2, 0, 3,
+   0, 1, 3, 1, 2, 3,
+   3, 2, 6, 3, 6, 7,
+   2, 1, 5, 2, 5, 6,
+   1, 0, 4, 1, 4, 5,
+   0, 7, 4, 0, 3, 7,
+   4, 6, 5, 4, 7, 6,
 };
 
 typedef struct {
@@ -568,7 +578,7 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
    VkVertexInputAttributeDescription Vertex_Attribute_Descriptions[2] = {0};
    Vertex_Attribute_Descriptions[0].binding = 0;
    Vertex_Attribute_Descriptions[0].location = 0;
-   Vertex_Attribute_Descriptions[0].format = VK_FORMAT_R32G32_SFLOAT;
+   Vertex_Attribute_Descriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT;
    Vertex_Attribute_Descriptions[0].offset = offsetof(vertex, Position);
    Vertex_Attribute_Descriptions[1].binding = 0;
    Vertex_Attribute_Descriptions[1].location = 1;
@@ -907,11 +917,11 @@ static RENDER_WITH_VULKAN(Render_With_Vulkan)
 
       // NOTE: Update uniforms.
       static float Delta;
-      vec3 Eye = {2, 2, 2};
+      vec3 Eye = {5, 5, 5};
       vec3 Target = {0, 0, 0};
 
       uniform_buffer_object UBO = {0};
-      UBO.Model = Rotate_Z(Cosine(Delta));
+      UBO.Model = Rotate_Y(Cosine(Delta));
       UBO.View = Look_At(Eye, Target);
       UBO.Projection = Perspective(VK->Swapchain_Extent.width, VK->Swapchain_Extent.height, 0.1f, 100.0f);
 
