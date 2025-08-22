@@ -446,7 +446,8 @@ int main(void)
 #if DEBUG
       if((Wayland.Frame_Count % 60) == 0)
       {
-         printf("Frame Time: %fms\n", Frame_Seconds_Elapsed * 1000.0f);
+         printf("Frame Time: %fms \r", Frame_Seconds_Elapsed * 1000.0f);
+         fflush(stdout);
       }
 #endif
       Wayland.Frame_Count++;

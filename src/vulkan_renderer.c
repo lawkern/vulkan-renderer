@@ -1,6 +1,6 @@
 /* (c) copyright 2025 Lawrence D. Kern /////////////////////////////////////// */
 
-#include "data.h"
+#include "data.c"
 
 static bool Vulkan_Extensions_Supported(VkExtensionProperties *Extensions, u32 Extension_Count, const char **Required_Names, u32 Required_Count)
 {
@@ -48,6 +48,31 @@ static void Confirm_Vulkan_Device_Extensions(VkPhysicalDevice Physical_Device, c
 
    bool Found_All = Vulkan_Extensions_Supported(Extensions, Total_Count, Required_Names, Required_Count);
    Assert(Found_All);
+}
+
+static VkImageView Create_Vulkan_Image_View(vulkan_context *VK, VkImage Image, VkFormat Format)
+{
+   VkImageViewCreateInfo View_Info = {0};
+   View_Info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+   View_Info.image = Image;
+   View_Info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+   View_Info.format = Format;
+
+   View_Info.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+   View_Info.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+   View_Info.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+   View_Info.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+
+   View_Info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+   View_Info.subresourceRange.baseMipLevel = 0;
+   View_Info.subresourceRange.levelCount = 1;
+   View_Info.subresourceRange.baseArrayLayer = 0;
+   View_Info.subresourceRange.layerCount = 1;
+
+   VkImageView Image_View;
+   VK_CHECK(vkCreateImageView(VK->Device, &View_Info, 0, &Image_View));
+
+   return(Image_View);
 }
 
 static void Destroy_Vulkan_Swapchain(vulkan_context *VK)
@@ -166,22 +191,7 @@ static void Create_Vulkan_Swapchain(vulkan_context *VK)
    VK->Swapchain_Image_Views = Allocate(&VK->Arena, VkImageView, VK->Swapchain_Image_Count);
    for(u32 Image_Index = 0; Image_Index < VK->Swapchain_Image_Count; ++Image_Index)
    {
-      VkImageViewCreateInfo View_Info = {0};
-      View_Info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-      View_Info.image = VK->Swapchain_Images[Image_Index];
-      View_Info.viewType = VK_IMAGE_VIEW_TYPE_2D;
-      View_Info.format = VK->Swapchain_Image_Format;
-      View_Info.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
-      View_Info.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
-      View_Info.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
-      View_Info.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
-      View_Info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-      View_Info.subresourceRange.baseMipLevel = 0;
-      View_Info.subresourceRange.levelCount = 1;
-      View_Info.subresourceRange.baseArrayLayer = 0;
-      View_Info.subresourceRange.layerCount = 1;
-
-      VK_CHECK(vkCreateImageView(VK->Device, &View_Info, 0, &VK->Swapchain_Image_Views[Image_Index]));
+      VK->Swapchain_Image_Views[Image_Index] = Create_Vulkan_Image_View(VK, VK->Swapchain_Images[Image_Index], VK->Swapchain_Image_Format);
    }
 }
 
@@ -489,6 +499,34 @@ static void Create_Vulkan_Texture_Image(vulkan_context *VK)
    vkFreeMemory(VK->Device, Staging_Buffer_Memory, 0);
 }
 
+static void Create_Vulkan_Texture_Image_View(vulkan_context *VK)
+{
+   VK->Texture_Image_View = Create_Vulkan_Image_View(VK, VK->Texture_Image, VK_FORMAT_R8G8B8A8_SRGB);
+}
+
+static void Create_Vulkan_Texture_Sampler(vulkan_context *VK, VkSampler *Sampler)
+{
+   VkSamplerCreateInfo Sampler_Info = {0};
+   Sampler_Info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+   Sampler_Info.magFilter = VK_FILTER_LINEAR;
+   Sampler_Info.minFilter = VK_FILTER_LINEAR;
+   Sampler_Info.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+   Sampler_Info.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+   Sampler_Info.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+   Sampler_Info.anisotropyEnable = VK->Physical_Device_Enabled_Features.samplerAnisotropy;
+   Sampler_Info.maxAnisotropy = (VK->Physical_Device_Enabled_Features.samplerAnisotropy) ? VK->Physical_Device_Properties.limits.maxSamplerAnisotropy : 1.0f;
+   Sampler_Info.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+   Sampler_Info.unnormalizedCoordinates = VK_FALSE;
+   Sampler_Info.compareEnable = VK_FALSE;
+   Sampler_Info.compareOp = VK_COMPARE_OP_ALWAYS;
+   Sampler_Info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+   Sampler_Info.mipLodBias = 0.0f;
+   Sampler_Info.minLod = 0.0f;
+   Sampler_Info.maxLod = 0.0f;
+
+   VK_CHECK(vkCreateSampler(VK->Device, &Sampler_Info, 0, Sampler));
+}
+
 static INITIALIZE_VULKAN(Initialize_Vulkan)
 {
    VK->Platform_Context = Platform_Context;
@@ -531,6 +569,10 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
    VkPhysicalDevice *Physical_Devices = Allocate(&VK->Scratch, VkPhysicalDevice, Physical_Count);
    VK_CHECK(vkEnumeratePhysicalDevices(VK->Instance, &Physical_Count, Physical_Devices));
 
+   // NOTE: For now, any features enabled in this struct need to be kept in sync
+   // with the physical device check below.
+   VK->Physical_Device_Enabled_Features.samplerAnisotropy = VK_TRUE;
+
    VK->Physical_Device = VK_NULL_HANDLE;
    for(u32 Physical_Index = 0; Physical_Index < Physical_Count; ++Physical_Index)
    {
@@ -538,16 +580,17 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
 
       VkPhysicalDeviceProperties Properties;
       vkGetPhysicalDeviceProperties(Physical_Device, &Properties);
-      printf("Device Name: %s\n", Properties.deviceName);
 
       VkPhysicalDeviceFeatures Features;
       vkGetPhysicalDeviceFeatures(Physical_Device, &Features);
 
-      // TODO: For now, just use the first encountered device. Later we'll query for
-      // the most appropriate properties.
-      if(VK->Physical_Device == VK_NULL_HANDLE)
+      if(VK->Physical_Device == VK_NULL_HANDLE && Features.samplerAnisotropy == VK->Physical_Device_Enabled_Features.samplerAnisotropy)
       {
+         printf("Device Name: %s\n", Properties.deviceName);
+
          VK->Physical_Device = Physical_Device;
+         VK->Physical_Device_Properties = Properties;
+         break;
       }
    }
    Assert(VK->Physical_Device != VK_NULL_HANDLE);
@@ -647,6 +690,7 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
    Device_Create_Info.pQueueCreateInfos = Queue_Infos;
    Device_Create_Info.enabledExtensionCount = Array_Count(Required_Device_Extension_Names);
    Device_Create_Info.ppEnabledExtensionNames = Required_Device_Extension_Names;
+   Device_Create_Info.pEnabledFeatures = &VK->Physical_Device_Enabled_Features;
 
    VK_CHECK(vkCreateDevice(VK->Physical_Device, &Device_Create_Info, 0, &VK->Device));
 
@@ -694,7 +738,7 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
    Vertex_Binding_Description.stride = sizeof(*Vertices);
    Vertex_Binding_Description.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 
-   VkVertexInputAttributeDescription Vertex_Attribute_Descriptions[2] = {0};
+   VkVertexInputAttributeDescription Vertex_Attribute_Descriptions[3] = {0};
    Vertex_Attribute_Descriptions[0].binding = 0;
    Vertex_Attribute_Descriptions[0].location = 0;
    Vertex_Attribute_Descriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT;
@@ -703,6 +747,10 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
    Vertex_Attribute_Descriptions[1].location = 1;
    Vertex_Attribute_Descriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
    Vertex_Attribute_Descriptions[1].offset = offsetof(vertex, Color);
+   Vertex_Attribute_Descriptions[2].binding = 0;
+   Vertex_Attribute_Descriptions[2].location = 2;
+   Vertex_Attribute_Descriptions[2].format = VK_FORMAT_R32G32_SFLOAT;
+   Vertex_Attribute_Descriptions[2].offset = offsetof(vertex, Texture_Coordinate);
 
    VkPipelineVertexInputStateCreateInfo Vertex_Input_Info = {0};
    Vertex_Input_Info.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
@@ -820,6 +868,10 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
 
    // NOTE: Create images.
    Create_Vulkan_Texture_Image(VK);
+   Create_Vulkan_Texture_Image_View(VK);
+
+   // NOTE: Create samplers.
+   Create_Vulkan_Texture_Sampler(VK, &VK->Texture_Sampler);
 
    // NOTE: Create descriptor set layout.
    VkDescriptorSetLayoutBinding UBO_Layout_Binding = {0};
@@ -829,20 +881,37 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
    UBO_Layout_Binding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
    UBO_Layout_Binding.pImmutableSamplers = 0;
 
+   VkDescriptorSetLayoutBinding Sampler_Layout_Binding = {0};
+   Sampler_Layout_Binding.binding = 1;
+   Sampler_Layout_Binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+   Sampler_Layout_Binding.descriptorCount = 1;
+   Sampler_Layout_Binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+   Sampler_Layout_Binding.pImmutableSamplers = 0;
+
+   VkDescriptorSetLayoutBinding Descriptor_Set_Layout_Bindings[] =
+   {
+      UBO_Layout_Binding,
+      Sampler_Layout_Binding,
+   };
+
    VkDescriptorSetLayoutCreateInfo Descriptor_Layout_Info = {0};
    Descriptor_Layout_Info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-   Descriptor_Layout_Info.bindingCount = 1;
-   Descriptor_Layout_Info.pBindings = &UBO_Layout_Binding;
+   Descriptor_Layout_Info.bindingCount = Array_Count(Descriptor_Set_Layout_Bindings);
+   Descriptor_Layout_Info.pBindings = Descriptor_Set_Layout_Bindings;
    VK_CHECK(vkCreateDescriptorSetLayout(VK->Device, &Descriptor_Layout_Info, 0, &VK->Descriptor_Set_Layout));
 
-   VkDescriptorPoolSize Descriptor_Pool_Size = {0};
-   Descriptor_Pool_Size.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-   Descriptor_Pool_Size.descriptorCount = MAX_FRAMES_IN_FLIGHT;
+   VkDescriptorPoolSize Descriptor_Pool_Sizes[2] = {0};
+   Assert(Array_Count(Descriptor_Pool_Sizes) == Array_Count(Descriptor_Set_Layout_Bindings));
+
+   Descriptor_Pool_Sizes[0].type = Descriptor_Set_Layout_Bindings[0].descriptorType;
+   Descriptor_Pool_Sizes[0].descriptorCount = MAX_FRAMES_IN_FLIGHT;
+   Descriptor_Pool_Sizes[1].type = Descriptor_Set_Layout_Bindings[1].descriptorType;
+   Descriptor_Pool_Sizes[1].descriptorCount = MAX_FRAMES_IN_FLIGHT;
 
    VkDescriptorPoolCreateInfo Descriptor_Pool_Info = {0};
    Descriptor_Pool_Info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-   Descriptor_Pool_Info.poolSizeCount = 1;
-   Descriptor_Pool_Info.pPoolSizes = &Descriptor_Pool_Size;
+   Descriptor_Pool_Info.poolSizeCount = Array_Count(Descriptor_Pool_Sizes);
+   Descriptor_Pool_Info.pPoolSizes = Descriptor_Pool_Sizes;
    Descriptor_Pool_Info.maxSets = MAX_FRAMES_IN_FLIGHT;
 
    VK_CHECK(vkCreateDescriptorPool(VK->Device, &Descriptor_Pool_Info, 0, &VK->Descriptor_Pool));
@@ -868,18 +937,33 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
       Buffer_Info.offset = 0;
       Buffer_Info.range = sizeof(uniform_buffer_object);
 
-      VkWriteDescriptorSet Descriptor_Write = {0};
-      Descriptor_Write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-      Descriptor_Write.dstSet = VK->Descriptor_Sets[Frame_Index];
-      Descriptor_Write.dstBinding = 0;
-      Descriptor_Write.dstArrayElement = 0;
-      Descriptor_Write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-      Descriptor_Write.descriptorCount = 1;
-      Descriptor_Write.pBufferInfo = &Buffer_Info;
-      Descriptor_Write.pImageInfo = 0;
-      Descriptor_Write.pTexelBufferView = 0;
+      VkDescriptorImageInfo Image_Info = {0};
+      Image_Info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+      Image_Info.imageView = VK->Texture_Image_View;
+      Image_Info.sampler = VK->Texture_Sampler;
 
-      vkUpdateDescriptorSets(VK->Device, 1, &Descriptor_Write, 0, 0);
+      VkWriteDescriptorSet Descriptor_Writes[2] = {0};
+      Descriptor_Writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+      Descriptor_Writes[0].dstSet = VK->Descriptor_Sets[Frame_Index];
+      Descriptor_Writes[0].dstBinding = 0;
+      Descriptor_Writes[0].dstArrayElement = 0;
+      Descriptor_Writes[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+      Descriptor_Writes[0].descriptorCount = 1;
+      Descriptor_Writes[0].pBufferInfo = &Buffer_Info;
+      Descriptor_Writes[0].pImageInfo = 0;
+      Descriptor_Writes[0].pTexelBufferView = 0;
+
+      Descriptor_Writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+      Descriptor_Writes[1].dstSet = VK->Descriptor_Sets[Frame_Index];
+      Descriptor_Writes[1].dstBinding = 1;
+      Descriptor_Writes[1].dstArrayElement = 0;
+      Descriptor_Writes[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+      Descriptor_Writes[1].descriptorCount = 1;
+      Descriptor_Writes[1].pBufferInfo = 0;
+      Descriptor_Writes[1].pImageInfo = &Image_Info;
+      Descriptor_Writes[1].pTexelBufferView = 0;
+
+      vkUpdateDescriptorSets(VK->Device, Array_Count(Descriptor_Writes), Descriptor_Writes, 0, 0);
    }
 
    // NOTE: Create pipeline layout.
@@ -1052,7 +1136,7 @@ static RENDER_WITH_VULKAN(Render_With_Vulkan)
 
       Copy_Memory(VK->Mapped_Uniform_Buffers[VK->Frame_Index], &UBO, sizeof(UBO));
 
-      Delta += 0.5f * Frame_Seconds_Elapsed;
+      Delta += 0.25f * Frame_Seconds_Elapsed;
       if(Delta >= 1.0f) Delta -= 1.0f;
 
       // NOTE: Submit command buffer.
@@ -1122,6 +1206,8 @@ static DESTROY_VULKAN(Destroy_Vulkan)
       vkFreeMemory(VK->Device, VK->Uniform_Buffer_Memories[Frame_Index], 0);
    }
 
+   vkDestroySampler(VK->Device, VK->Texture_Sampler, 0);
+   vkDestroyImageView(VK->Device, VK->Texture_Image_View, 0);
    vkDestroyImage(VK->Device, VK->Texture_Image, 0);
    vkFreeMemory(VK->Device, VK->Texture_Image_Memory, 0);
 

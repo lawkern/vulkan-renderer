@@ -8,6 +8,7 @@
 typedef struct {
    vec3 Position;
    vec3 Color;
+   vec2 Texture_Coordinate;
 } vertex;
 
 typedef struct {
@@ -20,7 +21,10 @@ typedef struct {
    VkInstance Instance;
    VkPhysicalDevice Physical_Device;
    VkSurfaceKHR Surface;
+
    VkDevice Device;
+   VkPhysicalDeviceFeatures Physical_Device_Enabled_Features;
+   VkPhysicalDeviceProperties Physical_Device_Properties;
 
    void *Platform_Context;
    arena Arena;
@@ -54,6 +58,8 @@ typedef struct {
 
    VkImage Texture_Image;
    VkDeviceMemory Texture_Image_Memory;
+   VkImageView Texture_Image_View;
+   VkSampler Texture_Sampler;
 
    VkBuffer Uniform_Buffers[MAX_FRAMES_IN_FLIGHT];
    VkDeviceMemory Uniform_Buffer_Memories[MAX_FRAMES_IN_FLIGHT];
