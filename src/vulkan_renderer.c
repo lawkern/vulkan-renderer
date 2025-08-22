@@ -529,6 +529,8 @@ static void Create_Vulkan_Texture_Sampler(vulkan_context *VK, VkSampler *Sampler
 
 static INITIALIZE_VULKAN(Initialize_Vulkan)
 {
+   bool Result = true;
+
    VK->Platform_Context = Platform_Context;
    VK->Arena = Make_Arena(Megabytes(256));
    VK->Scratch = Make_Arena(Megabytes(256));
@@ -1054,6 +1056,8 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
 
    // NOTE: Clear temporary memory.
    Reset_Arena(&VK->Scratch);
+
+   return(Result);
 }
 
 static RENDER_WITH_VULKAN(Render_With_Vulkan)
@@ -1189,43 +1193,52 @@ static RENDER_WITH_VULKAN(Render_With_Vulkan)
 
 static DESTROY_VULKAN(Destroy_Vulkan)
 {
-   vkDeviceWaitIdle(VK->Device);
-   for(int Frame_Index = 0; Frame_Index < MAX_FRAMES_IN_FLIGHT; ++Frame_Index)
+   if(VK->Device)
    {
-      vkDestroySemaphore(VK->Device, VK->Render_Finished_Semaphores[Frame_Index], 0);
-      vkDestroySemaphore(VK->Device, VK->Image_Available_Semaphores[Frame_Index], 0);
-      vkDestroyFence(VK->Device, VK->In_Flight_Fences[Frame_Index], 0);
+      vkDeviceWaitIdle(VK->Device);
+      for(int Frame_Index = 0; Frame_Index < MAX_FRAMES_IN_FLIGHT; ++Frame_Index)
+      {
+         vkDestroySemaphore(VK->Device, VK->Render_Finished_Semaphores[Frame_Index], 0);
+         vkDestroySemaphore(VK->Device, VK->Image_Available_Semaphores[Frame_Index], 0);
+         vkDestroyFence(VK->Device, VK->In_Flight_Fences[Frame_Index], 0);
+      }
+
+      Destroy_Vulkan_Swapchain(VK);
+      vkDestroyCommandPool(VK->Device, VK->Command_Pool, 0);
+
+      for(int Frame_Index = 0; Frame_Index < MAX_FRAMES_IN_FLIGHT; ++Frame_Index)
+      {
+         vkDestroyBuffer(VK->Device, VK->Uniform_Buffers[Frame_Index], 0);
+         vkFreeMemory(VK->Device, VK->Uniform_Buffer_Memories[Frame_Index], 0);
+      }
+
+      vkDestroySampler(VK->Device, VK->Texture_Sampler, 0);
+      vkDestroyImageView(VK->Device, VK->Texture_Image_View, 0);
+      vkDestroyImage(VK->Device, VK->Texture_Image, 0);
+      vkFreeMemory(VK->Device, VK->Texture_Image_Memory, 0);
+
+      vkDestroyBuffer(VK->Device, VK->Index_Buffer, 0);
+      vkFreeMemory(VK->Device, VK->Index_Buffer_Memory, 0);
+
+      vkDestroyBuffer(VK->Device, VK->Vertex_Buffer, 0);
+      vkFreeMemory(VK->Device, VK->Vertex_Buffer_Memory, 0);
+
+      vkDestroyPipeline(VK->Device, VK->Graphics_Pipeline, 0);
+      vkDestroyPipelineLayout(VK->Device, VK->Pipeline_Layout, 0);
+      vkDestroyDescriptorPool(VK->Device, VK->Descriptor_Pool, 0);
+      vkDestroyDescriptorSetLayout(VK->Device, VK->Descriptor_Set_Layout, 0);
+      vkDestroyRenderPass(VK->Device, VK->Render_Pass, 0);
+      vkDestroyShaderModule(VK->Device, VK->Fragment_Shader, 0);
+      vkDestroyShaderModule(VK->Device, VK->Vertex_Shader, 0);
+
+      vkDestroyDevice(VK->Device, 0);
    }
-
-   Destroy_Vulkan_Swapchain(VK);
-   vkDestroyCommandPool(VK->Device, VK->Command_Pool, 0);
-
-   for(int Frame_Index = 0; Frame_Index < MAX_FRAMES_IN_FLIGHT; ++Frame_Index)
+   if(VK->Instance)
    {
-      vkDestroyBuffer(VK->Device, VK->Uniform_Buffers[Frame_Index], 0);
-      vkFreeMemory(VK->Device, VK->Uniform_Buffer_Memories[Frame_Index], 0);
+      if(VK->Surface)
+      {
+         vkDestroySurfaceKHR(VK->Instance, VK->Surface, 0);
+      }
+      vkDestroyInstance(VK->Instance, 0);
    }
-
-   vkDestroySampler(VK->Device, VK->Texture_Sampler, 0);
-   vkDestroyImageView(VK->Device, VK->Texture_Image_View, 0);
-   vkDestroyImage(VK->Device, VK->Texture_Image, 0);
-   vkFreeMemory(VK->Device, VK->Texture_Image_Memory, 0);
-
-   vkDestroyBuffer(VK->Device, VK->Index_Buffer, 0);
-   vkFreeMemory(VK->Device, VK->Index_Buffer_Memory, 0);
-
-   vkDestroyBuffer(VK->Device, VK->Vertex_Buffer, 0);
-   vkFreeMemory(VK->Device, VK->Vertex_Buffer_Memory, 0);
-
-   vkDestroyPipeline(VK->Device, VK->Graphics_Pipeline, 0);
-   vkDestroyPipelineLayout(VK->Device, VK->Pipeline_Layout, 0);
-   vkDestroyDescriptorPool(VK->Device, VK->Descriptor_Pool, 0);
-   vkDestroyDescriptorSetLayout(VK->Device, VK->Descriptor_Set_Layout, 0);
-   vkDestroyRenderPass(VK->Device, VK->Render_Pass, 0);
-   vkDestroyShaderModule(VK->Device, VK->Fragment_Shader, 0);
-   vkDestroyShaderModule(VK->Device, VK->Vertex_Shader, 0);
-
-   vkDestroyDevice(VK->Device, 0);
-   vkDestroySurfaceKHR(VK->Instance, VK->Surface, 0);
-   vkDestroyInstance(VK->Instance, 0);
 }

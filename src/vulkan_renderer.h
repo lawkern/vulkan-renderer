@@ -97,7 +97,7 @@ typedef struct {
 
 // NOTE: Renderer API for use by each platform:
 
-#define INITIALIZE_VULKAN(Name) void Name(vulkan_context *VK, void *Platform_Context)
+#define INITIALIZE_VULKAN(Name) bool Name(vulkan_context *VK, void *Platform_Context)
 static INITIALIZE_VULKAN(Initialize_Vulkan);
 
 #define RENDER_WITH_VULKAN(Name) void Name(vulkan_context *VK, float Frame_Seconds_Elapsed)
