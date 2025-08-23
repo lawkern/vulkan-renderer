@@ -327,15 +327,55 @@ static const struct wl_callback_listener Frame_Listener =
 
 static void Create_Wayland_Frame_Callback(wayland_context *Wayland)
 {
+   // NOTE: If we cared about fullscreen for the fallback layer, we could
+   // reallocate the buffer or mess with the viewport. For now, just drawing
+   // within the orginal dimensions is good enough.
+#if 0
    int Width = Wayland->Window_Width;
    int Height = Wayland->Window_Height;
+#else
+   int Width = DEFAULT_RESOLUTION_WIDTH;
+   int Height = DEFAULT_RESOLUTION_HEIGHT;
+#endif
    u32 *Pixels = Wayland->Buffer_Pixels;
 
-   for(int Y = 0; Y < Height; ++Y)
+
+   // TODO: Update the top-level message when we start using a newer version of
+   // Vulkan. We also want to accept more useful messages from Vulkan about what
+   // went wrong.
+   char *Message_Lines[] =
    {
-      for(int X = 0; X < Width; ++X)
+      "Hey there! This program requires Vulkan 1.0.",
+      "Make sure you have the right drivers installed.",
+   };
+
+   // NOTE: Clear the screen and print out a tiny debug message.
+   int Count = Width * Height;
+   for(int Index = 0; Index < Count; ++Index)
+   {
+      Pixels[Index] = 0xFF0000FF;
+   }
+   for(int Line_Index = 0; Line_Index < Array_Count(Message_Lines); ++Line_Index)
+   {
+      char *Message = Message_Lines[Line_Index];
+      int Y_Offset = Line_Index * Glyph_Height;
+
+      for(char *Character = Message; *Character; ++Character)
       {
-         Pixels[Y*Width + X] = 0x000000FF;
+         int Index = *Character;
+         int X_Offset = (Character - Message) * Glyph_Width;
+
+         for(int Y = 0; Y < Glyph_Height; ++Y)
+         {
+            for(int X = 0; X < Glyph_Width; ++X)
+            {
+               u8 Source = Glyphs[Index][Y*Glyph_Width + X];
+               if(Source)
+               {
+                  Pixels[(Y + Y_Offset)*Width + X + X_Offset] = 0xFFFFFFFF;
+               }
+            }
+         }
       }
    }
 
