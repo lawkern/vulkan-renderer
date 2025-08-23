@@ -30,6 +30,8 @@
 #include "platform.h"
 #include "vulkan_renderer.h"
 
+#define SHM_BUFFER_COUNT 2
+
 typedef struct {
    struct wl_display *Display;
    struct wl_compositor *Compositor;
@@ -38,11 +40,12 @@ typedef struct {
    struct wl_seat *Seat;
    struct wl_keyboard *Keyboard;
 
-   struct wl_shm *Shared_Memory;
-   int Shared_Memory_File;
    struct wl_shm_pool *Pool;
-   struct wl_buffer *Buffer;
-   size Buffer_Size;
+   struct wl_buffer *Buffers[SHM_BUFFER_COUNT];
+   struct wl_shm *Shared_Memory;
+   size Shared_Memory_Size;
+   int Shared_Memory_File;
+   int Buffer_Index;
    u32 *Buffer_Pixels;
 
    struct xdg_wm_base *Desktop_Base;
@@ -69,6 +72,19 @@ typedef struct {
 
 #include "vulkan_renderer.c"
 
+// NOTE: Platform API implementations.
+static LOG(Log)
+{
+   va_list Arguments;
+
+   va_start(Arguments, Format);
+   vprintf(Format, Arguments);
+   va_end(Arguments);
+
+   // NOTE: Flush so that \r functions properly.
+   fflush(stdout);
+}
+
 static READ_ENTIRE_FILE(Read_Entire_File)
 {
    string Result = {0};
@@ -92,7 +108,7 @@ static READ_ENTIRE_FILE(Read_Entire_File)
                }
                else if(Single_Read == -1)
                {
-                  fprintf(stderr, "Failed to read file %s.\n", Path);
+                  Log("Failed to read file %s.\n", Path);
                   break;
                }
                else
@@ -107,17 +123,17 @@ static READ_ENTIRE_FILE(Read_Entire_File)
          }
          else
          {
-            fprintf(stderr, "Failed to allocate file %s.\n", Path);
+            Log("Failed to allocate file %s.\n", Path);
          }
       }
       else
       {
-         fprintf(stderr, "Failed to open file %s.\n", Path);
+         Log("Failed to open file %s.\n", Path);
       }
    }
    else
    {
-      fprintf(stderr, "Failed to determine size of file %s.\n", Path);
+      Log("Failed to determine size of file %s.\n", Path);
    }
 
    return(Result);
@@ -131,33 +147,41 @@ static GET_WINDOW_DIMENSIONS(Get_Window_Dimensions)
    *Height = Wayland->Window_Height;
 }
 
-static int Create_Wayland_Shared_Memory_File(size Size)
+static inline void Toggle_Wayland_Fullscreen(wayland_context *Wayland)
 {
-   char Template[] = "/tmp/wayland-XXXXXX";
-
-   int Result = mkstemp(Template);
-   if(Result >= 0)
+   static bool Fullscreen;
+   if(!Fullscreen)
    {
-      unlink(Template);
-      if(ftruncate(Result, Size) == 0)
-      {
-         // NOTE: Success.
-      }
-      else
-      {
-         close(Result);
-
-         fprintf(stderr, "Failed to truncate shared memory file.\n");
-         Invalid_Code_Path;
-      }
+      xdg_toplevel_set_fullscreen(Wayland->Desktop_Toplevel, 0);
    }
    else
    {
-      fprintf(stderr, "Failed to open shared memory file.\n");
-      Invalid_Code_Path;
+      xdg_toplevel_unset_fullscreen(Wayland->Desktop_Toplevel);
    }
+   Fullscreen = !Fullscreen;
+}
 
-   return(Result);
+static inline float Compute_Wayland_Frame_Time(wayland_context *Wayland)
+{
+   // NOTE: This function assumes that either clock_gettime was called on
+   // Wayland->Frame_Start prior to the first time this is called, or else that
+   // the program is robust in the face of large time steps.
+
+   clock_gettime(CLOCK_MONOTONIC, &Wayland->Frame_End);
+   time_t Seconds_Elapsed = Wayland->Frame_End.tv_sec - Wayland->Frame_Start.tv_sec;
+   time_t Nanoseconds_Elapsed = Wayland->Frame_End.tv_nsec - Wayland->Frame_Start.tv_nsec;
+
+   float Frame_Seconds_Elapsed = Seconds_Elapsed + (1e-9 * Nanoseconds_Elapsed);
+#if DEBUG
+   if((Wayland->Frame_Count % 60) == 0)
+   {
+      Log("Frame Time: %fms \r", Frame_Seconds_Elapsed * 1000.0f);
+   }
+#endif
+   Wayland->Frame_Start = Wayland->Frame_End;
+   Wayland->Frame_Count++;
+
+   return(Frame_Seconds_Elapsed);
 }
 
 // NOTE: Configure desktop base callbacks.
@@ -170,6 +194,7 @@ static const struct xdg_wm_base_listener Desktop_Base_Listener =
    .ping = Ping_Desktop_Base,
 };
 
+// NOTE: Configure desktop surface callbacks.
 static void Configure_Desktop_Surface(void *Data, struct xdg_surface *Surface, u32 Serial)
 {
    xdg_surface_ack_configure(Surface, Serial);
@@ -214,20 +239,6 @@ static const struct xdg_toplevel_listener Desktop_Toplevel_Listener =
    .close = Close_Desktop_Toplevel,
 };
 
-static void Toggle_Wayland_Fullscreen(wayland_context *Wayland)
-{
-   static bool Fullscreen;
-   if(!Fullscreen)
-   {
-      xdg_toplevel_set_fullscreen(Wayland->Desktop_Toplevel, 0);
-   }
-   else
-   {
-      xdg_toplevel_unset_fullscreen(Wayland->Desktop_Toplevel);
-   }
-   Fullscreen = !Fullscreen;
-}
-
 // NOTE: Configure keyboard input callbacks.
 static void Map_Keyboard(void *Data, struct wl_keyboard *Keyboard, u32 Format, int File, u32 Size)
 {
@@ -235,9 +246,11 @@ static void Map_Keyboard(void *Data, struct wl_keyboard *Keyboard, u32 Format, i
 }
 static void Enter_Keyboard(void *Data, struct wl_keyboard *Keyboard, u32 Serial, struct wl_surface *Surface, struct wl_array *Keys)
 {
+   // ...
 }
 static void Leave_Keyboard(void *Data, struct wl_keyboard *Keyboard, u32 Serial, struct wl_surface *Surface)
 {
+   // ...
 }
 static void Key_Keyboard(void *Data, struct wl_keyboard *Keyboard, u32 Serial, u32 Time, u32 Key, u32 State)
 {
@@ -280,6 +293,7 @@ static void Modify_Keyboard(void *Data, struct wl_keyboard *Keyboard, u32 Serial
 }
 static void Repeat_Keyboard(void *Data, struct wl_keyboard *Keyboard, int Rate, int Delay)
 {
+   // ...
 }
 static const struct wl_keyboard_listener Keyboard_Listener =
 {
@@ -292,25 +306,6 @@ static const struct wl_keyboard_listener Keyboard_Listener =
 };
 
 // NOTE: Configure frame completion.
-static inline float Compute_Wayland_Frame_Time(wayland_context *Wayland)
-{
-   clock_gettime(CLOCK_MONOTONIC, &Wayland->Frame_End);
-   time_t Seconds_Elapsed = Wayland->Frame_End.tv_sec - Wayland->Frame_Start.tv_sec;
-   time_t Nanoseconds_Elapsed = Wayland->Frame_End.tv_nsec - Wayland->Frame_Start.tv_nsec;
-   float Frame_Seconds_Elapsed = Seconds_Elapsed + (1e-9 * Nanoseconds_Elapsed);
-#if DEBUG
-   if((Wayland->Frame_Count % 60) == 0)
-   {
-      printf("Frame Time: %fms \r", Frame_Seconds_Elapsed * 1000.0f);
-      fflush(stdout);
-   }
-#endif
-   Wayland->Frame_Start = Wayland->Frame_End;
-   Wayland->Frame_Count++;
-
-   return(Frame_Seconds_Elapsed);
-}
-
 static void Create_Wayland_Frame_Callback(wayland_context *Wayland);
 
 static void Frame_Done(void *Data, struct wl_callback *Callback, u32 Time)
@@ -337,8 +332,7 @@ static void Create_Wayland_Frame_Callback(wayland_context *Wayland)
    int Width = DEFAULT_RESOLUTION_WIDTH;
    int Height = DEFAULT_RESOLUTION_HEIGHT;
 #endif
-   u32 *Pixels = Wayland->Buffer_Pixels;
-
+   u32 *Pixels = Wayland->Buffer_Pixels + Width*Height*Wayland->Buffer_Index;
 
    // TODO: Update the top-level message when we start using a newer version of
    // Vulkan. We also want to accept more useful messages from Vulkan about what
@@ -379,8 +373,11 @@ static void Create_Wayland_Frame_Callback(wayland_context *Wayland)
       }
    }
 
-   wl_surface_attach(Wayland->Surface, Wayland->Buffer, 0, 0);
+   wl_surface_attach(Wayland->Surface, Wayland->Buffers[Wayland->Buffer_Index], 0, 0);
    wl_surface_damage(Wayland->Surface, 0, 0, Width, Height);
+
+   Wayland->Buffer_Index++;
+   Wayland->Buffer_Index %= SHM_BUFFER_COUNT;
 
    // NOTE: This is here to print the frame time, the value isn't important.
    Compute_Wayland_Frame_Time(Wayland);
@@ -391,9 +388,11 @@ static void Create_Wayland_Frame_Callback(wayland_context *Wayland)
    wl_surface_commit(Wayland->Surface);
 }
 
-// NOTE: Configure the global registry by adding the callbacks we defined above.
+// NOTE: Configure the global registry.
 static void Global_Registry(void *Data, struct wl_registry *Registry, u32 ID, const char *Interface, u32 Version)
 {
+   // Log("%s v%u: %u\n", Interface, Version, ID);
+
    wayland_context *Wayland = Data;
    if(Strings_Are_Equal(Interface, wl_compositor_interface.name))
    {
@@ -439,11 +438,14 @@ static const struct wl_registry_listener Registry_Listener =
 static void Destroy_Wayland(wayland_context *Wayland)
 {
    // NOTE: Destroy shared memory.
-   if(Wayland->Buffer)
+   for(int Buffer_Index = 0; Buffer_Index < SHM_BUFFER_COUNT; ++Buffer_Index)
    {
-      wl_surface_attach(Wayland->Surface, 0, 0, 0);
-      wl_surface_commit(Wayland->Surface);
-      wl_buffer_destroy(Wayland->Buffer);
+      if(Wayland->Buffers[Buffer_Index])
+      {
+         wl_surface_attach(Wayland->Surface, 0, 0, 0);
+         wl_surface_commit(Wayland->Surface);
+         wl_buffer_destroy(Wayland->Buffers[Buffer_Index]);
+      }
    }
    if(Wayland->Pool)
    {
@@ -451,7 +453,7 @@ static void Destroy_Wayland(wayland_context *Wayland)
    }
    if(Wayland->Buffer_Pixels)
    {
-      munmap(Wayland->Buffer_Pixels, Wayland->Buffer_Size);
+      munmap(Wayland->Buffer_Pixels, Wayland->Shared_Memory_Size);
    }
    if(Wayland->Shared_Memory_File > 0)
    {
@@ -512,6 +514,35 @@ static void Destroy_Wayland(wayland_context *Wayland)
    }
 }
 
+static int Create_Wayland_Shared_Memory_File(size Size)
+{
+   char Template[] = "/tmp/wayland-XXXXXX";
+
+   int Result = mkstemp(Template);
+   if(Result >= 0)
+   {
+      unlink(Template);
+      if(ftruncate(Result, Size) == 0)
+      {
+         // NOTE: Success.
+      }
+      else
+      {
+         close(Result);
+
+         Log("Failed to truncate shared memory file.\n");
+         Invalid_Code_Path;
+      }
+   }
+   else
+   {
+      Log("Failed to open shared memory file.\n");
+      Invalid_Code_Path;
+   }
+
+   return(Result);
+}
+
 static void Initialize_Wayland(wayland_context *Wayland, int Width, int Height)
 {
    Wayland->Display = wl_display_connect(0);
@@ -539,7 +570,7 @@ static void Initialize_Wayland(wayland_context *Wayland, int Width, int Height)
                if(Wayland->Desktop_Toplevel)
                {
                   xdg_toplevel_add_listener(Wayland->Desktop_Toplevel, &Desktop_Toplevel_Listener, Wayland);
-                  xdg_toplevel_set_title(Wayland->Desktop_Toplevel, "Vulkan Window (Wayland)");
+                  xdg_toplevel_set_title(Wayland->Desktop_Toplevel, "Vulkan Window (Wayland)\n");
 
                   // NOTE: Explicitly setting the min and max sizes to the same
                   // values is an indirect way of requesting a floating window
@@ -562,42 +593,46 @@ static void Initialize_Wayland(wayland_context *Wayland, int Width, int Height)
                   // NOTE: Set up a fallback buffer to draw into if we fail to
                   // initialize Vulkan.
                   int Stride = Width * sizeof(u32);
-                  Wayland->Buffer_Size = Stride * Height;
-                  Wayland->Shared_Memory_File = Create_Wayland_Shared_Memory_File(Wayland->Buffer_Size);
+                  Wayland->Shared_Memory_Size = Stride * Height * SHM_BUFFER_COUNT;
+                  Wayland->Shared_Memory_File = Create_Wayland_Shared_Memory_File(Wayland->Shared_Memory_Size);
 
-                  Wayland->Buffer_Pixels = mmap(0, Wayland->Buffer_Size, PROT_READ|PROT_WRITE, MAP_SHARED, Wayland->Shared_Memory_File, 0);
-                  Wayland->Pool = wl_shm_create_pool(Wayland->Shared_Memory, Wayland->Shared_Memory_File, Wayland->Buffer_Size);
-                  Wayland->Buffer = wl_shm_pool_create_buffer(Wayland->Pool, 0, Width, Height, Stride, WL_SHM_FORMAT_XRGB8888);
+                  Wayland->Buffer_Pixels = mmap(0, Wayland->Shared_Memory_Size, PROT_READ|PROT_WRITE, MAP_SHARED, Wayland->Shared_Memory_File, 0);
+                  Wayland->Pool = wl_shm_create_pool(Wayland->Shared_Memory, Wayland->Shared_Memory_File, Wayland->Shared_Memory_Size);
+                  for(int Buffer_Index = 0; Buffer_Index < SHM_BUFFER_COUNT; ++Buffer_Index)
+                  {
+                     size Offset = Stride * Height * Buffer_Index;
+                     Wayland->Buffers[Buffer_Index] = wl_shm_pool_create_buffer(Wayland->Pool, Offset, Width, Height, Stride, WL_SHM_FORMAT_XRGB8888);
 
-                  wl_surface_attach(Wayland->Surface, Wayland->Buffer, 0, 0);
-                  wl_surface_damage(Wayland->Surface, 0, 0, Width, Height);
-                  wl_surface_commit(Wayland->Surface);
+                     wl_surface_attach(Wayland->Surface, Wayland->Buffers[Buffer_Index], 0, 0);
+                     wl_surface_damage(Wayland->Surface, 0, 0, Width, Height);
+                     wl_surface_commit(Wayland->Surface);
+                  }
 
                   Wayland->Running = true;
                }
                else
                {
-                  fprintf(stderr, "Failed to create XDG toplevel\n");
+                  Log("Failed to create XDG toplevel\n");
                }
             }
             else
             {
-               fprintf(stderr, "Failed to create XDG surface\n");
+               Log("Failed to create XDG surface\n");
             }
          }
          else
          {
-            fprintf(stderr, "Failed to create Wayland surface\n");
+            Log("Failed to create Wayland surface\n");
          }
       }
       else
       {
-         fprintf(stderr, "Failed to bind required Wayland interfaces\n");
+         Log("Failed to bind required Wayland interfaces\n");
       }
    }
    else
    {
-      fprintf(stderr, "Failed to connect to Wayland display\n");
+      Log("Failed to connect to Wayland display\n");
    }
 }
 
@@ -638,7 +673,7 @@ int main(void)
       {
          // NOTE: We still need to handle input events in the main loop, even if
          // rendering is happening in the frame callback.
-         wl_display_roundtrip(Wayland.Display);
+         wl_display_dispatch(Wayland.Display);
       }
    }
 

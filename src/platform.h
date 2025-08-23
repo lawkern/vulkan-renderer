@@ -2,6 +2,9 @@
 
 // NOTE: API to be implemented by each platform for use by the renderer:
 
+#define LOG(Name) void Name(char *Format, ...)
+static LOG(Log);
+
 #define READ_ENTIRE_FILE(Name) string Name(char *Path)
 static READ_ENTIRE_FILE(Read_Entire_File);
 

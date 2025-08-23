@@ -19,7 +19,7 @@ static bool Vulkan_Extensions_Supported(VkExtensionProperties *Extensions, u32 E
       }
       if(!Found)
       {
-         fprintf(stderr, "Error: Requested instance extension %s not available.\n", Required_Name);
+         Log("Error: Requested instance extension %s not available.\n", Required_Name);
          Result = false;
       }
    }
@@ -1241,4 +1241,6 @@ static DESTROY_VULKAN(Destroy_Vulkan)
       }
       vkDestroyInstance(VK->Instance, 0);
    }
+
+   Zero_Struct(VK);
 }

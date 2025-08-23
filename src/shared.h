@@ -45,6 +45,12 @@ static inline void Copy_Memory(void *Destination, void *Source, size Size)
    memcpy(Destination, Source, Size);
 }
 
+#define Zero_Struct(Struct) Zero_Memory((Struct), sizeof(*(Struct)))
+static inline void Zero_Memory(void *Destination, size Size)
+{
+   memset(Destination, 0, Size);
+}
+
 typedef struct {
    u8 *Base;
    size Size;
