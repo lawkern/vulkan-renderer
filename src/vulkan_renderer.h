@@ -18,6 +18,18 @@ typedef struct {
 } uniform_buffer_object;
 
 typedef struct {
+   VkSemaphore Image_Available_Semaphore;
+   VkFence In_Flight_Fence;
+
+   VkDescriptorSet Descriptor_Set;
+   VkCommandBuffer Command_Buffer;
+
+   VkBuffer Uniform_Buffer;
+   VkDeviceMemory Uniform_Buffer_Memory;
+   void *Mapped_Uniform_Buffer;
+} vulkan_frame;
+
+typedef struct {
    VkInstance Instance;
    VkPhysicalDevice Physical_Device;
    VkSurfaceKHR Surface;
@@ -38,6 +50,7 @@ typedef struct {
    VkImage *Swapchain_Images;
    VkImageView *Swapchain_Image_Views;
    VkFramebuffer *Swapchain_Framebuffers;
+   VkSemaphore *Render_Finished_Semaphores;
 
    VkShaderModule Vertex_Shader;
    VkShaderModule Fragment_Shader;
@@ -48,7 +61,6 @@ typedef struct {
 
    VkDescriptorSetLayout Descriptor_Set_Layout;
    VkDescriptorPool Descriptor_Pool;
-   VkDescriptorSet Descriptor_Sets[MAX_FRAMES_IN_FLIGHT];
 
    VkBuffer Vertex_Buffer;
    VkDeviceMemory Vertex_Buffer_Memory;
@@ -61,16 +73,8 @@ typedef struct {
    VkImageView Texture_Image_View;
    VkSampler Texture_Sampler;
 
-   VkBuffer Uniform_Buffers[MAX_FRAMES_IN_FLIGHT];
-   VkDeviceMemory Uniform_Buffer_Memories[MAX_FRAMES_IN_FLIGHT];
-   void *Mapped_Uniform_Buffers[MAX_FRAMES_IN_FLIGHT];
-
    VkCommandPool Command_Pool;
-   VkCommandBuffer Command_Buffers[MAX_FRAMES_IN_FLIGHT];
-
-   VkSemaphore Image_Available_Semaphores[MAX_FRAMES_IN_FLIGHT];
-   VkSemaphore Render_Finished_Semaphores[MAX_FRAMES_IN_FLIGHT];
-   VkFence In_Flight_Fences[MAX_FRAMES_IN_FLIGHT];
+   vulkan_frame Frames[MAX_FRAMES_IN_FLIGHT];
 
    u32 Compute_Queue_Family_Index;
    u32 Graphics_Queue_Family_Index;

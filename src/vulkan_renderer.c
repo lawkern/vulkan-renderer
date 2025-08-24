@@ -90,7 +90,7 @@ static void Create_Vulkan_Swapchain(vulkan_context *VK)
    VkSurfaceCapabilitiesKHR Surface_Capabilities;
    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(VK->Physical_Device, VK->Surface, &Surface_Capabilities);
 
-   u32 Surface_Format_Count;
+   u32 Surface_Format_Count = 0;
    vkGetPhysicalDeviceSurfaceFormatsKHR(VK->Physical_Device, VK->Surface, &Surface_Format_Count, 0);
    Assert(Surface_Format_Count > 0);
 
@@ -844,28 +844,32 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
 
    VK_CHECK(vkCreateCommandPool(VK->Device, &Pool_Info, 0, &VK->Command_Pool));
 
+   VkCommandBuffer Command_Buffers[MAX_FRAMES_IN_FLIGHT] = {0};
+
    VkCommandBufferAllocateInfo Allocate_Info = {0};
    Allocate_Info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
    Allocate_Info.commandPool = VK->Command_Pool;
    Allocate_Info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-   Allocate_Info.commandBufferCount = Array_Count(VK->Command_Buffers);
+   Allocate_Info.commandBufferCount = Array_Count(Command_Buffers);
 
-   VK_CHECK(vkAllocateCommandBuffers(VK->Device, &Allocate_Info, VK->Command_Buffers));
+   VK_CHECK(vkAllocateCommandBuffers(VK->Device, &Allocate_Info, Command_Buffers));
+   for(int Frame_Index = 0; Frame_Index < MAX_FRAMES_IN_FLIGHT; ++Frame_Index)
+   {
+      VK->Frames[Frame_Index].Command_Buffer = Command_Buffers[Frame_Index];
+   }
 
    // NOTE: Create buffers.
    Create_Vulkan_Vertex_Buffer(VK, Vertices, sizeof(Vertices));
    Create_Vulkan_Index_Buffer(VK, Indices, sizeof(Indices));
    for(int Frame_Index = 0; Frame_Index < MAX_FRAMES_IN_FLIGHT; ++Frame_Index)
    {
-      VkBuffer *Buffer = VK->Uniform_Buffers + Frame_Index;
-      VkDeviceMemory *Memory = VK->Uniform_Buffer_Memories + Frame_Index;
       size Size = sizeof(uniform_buffer_object);
       VkBufferUsageFlags Usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
       VkMemoryPropertyFlags Properties = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-      Create_Vulkan_Buffer(VK, Buffer, Memory, Size, Usage, Properties);
 
-      void *Mapped = VK->Mapped_Uniform_Buffers + Frame_Index;
-      VK_CHECK(vkMapMemory(VK->Device, *Memory, 0, Size, 0, Mapped));
+      vulkan_frame *Frame = VK->Frames + Frame_Index;
+      Create_Vulkan_Buffer(VK, &Frame->Uniform_Buffer, &Frame->Uniform_Buffer_Memory, Size, Usage, Properties);
+      VK_CHECK(vkMapMemory(VK->Device, Frame->Uniform_Buffer_Memory, 0, Size, 0, &Frame->Mapped_Uniform_Buffer));
    }
 
    // NOTE: Create images.
@@ -929,13 +933,20 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
    Descriptor_Set_Info.descriptorSetCount = MAX_FRAMES_IN_FLIGHT;
    Descriptor_Set_Info.pSetLayouts = Descriptor_Set_Layouts;
 
-   VK_CHECK(vkAllocateDescriptorSets(VK->Device, &Descriptor_Set_Info, VK->Descriptor_Sets));
+   VkDescriptorSet Descriptor_Sets[MAX_FRAMES_IN_FLIGHT];
+   VK_CHECK(vkAllocateDescriptorSets(VK->Device, &Descriptor_Set_Info, Descriptor_Sets));
+   for(int Frame_Index = 0; Frame_Index < MAX_FRAMES_IN_FLIGHT; ++Frame_Index)
+   {
+      VK->Frames[Frame_Index].Descriptor_Set = Descriptor_Sets[Frame_Index];
+   }
 
    // NOTE: Create descriptor sets.
    for(int Frame_Index = 0; Frame_Index < MAX_FRAMES_IN_FLIGHT; ++Frame_Index)
    {
+      vulkan_frame *Frame = VK->Frames + Frame_Index;
+
       VkDescriptorBufferInfo Buffer_Info = {0};
-      Buffer_Info.buffer = VK->Uniform_Buffers[Frame_Index];
+      Buffer_Info.buffer = Frame->Uniform_Buffer;
       Buffer_Info.offset = 0;
       Buffer_Info.range = sizeof(uniform_buffer_object);
 
@@ -946,7 +957,7 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
 
       VkWriteDescriptorSet Descriptor_Writes[2] = {0};
       Descriptor_Writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-      Descriptor_Writes[0].dstSet = VK->Descriptor_Sets[Frame_Index];
+      Descriptor_Writes[0].dstSet = Frame->Descriptor_Set;
       Descriptor_Writes[0].dstBinding = 0;
       Descriptor_Writes[0].dstArrayElement = 0;
       Descriptor_Writes[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -956,7 +967,7 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
       Descriptor_Writes[0].pTexelBufferView = 0;
 
       Descriptor_Writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-      Descriptor_Writes[1].dstSet = VK->Descriptor_Sets[Frame_Index];
+      Descriptor_Writes[1].dstSet = Frame->Descriptor_Set;
       Descriptor_Writes[1].dstBinding = 1;
       Descriptor_Writes[1].dstArrayElement = 0;
       Descriptor_Writes[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -1040,15 +1051,24 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
    // NOTE: Configure synchronization.
    for(int Frame_Index = 0; Frame_Index < MAX_FRAMES_IN_FLIGHT; ++Frame_Index)
    {
+      vulkan_frame *Frame = VK->Frames + Frame_Index;
+
       VkSemaphoreCreateInfo Semaphore_Info = {0};
       Semaphore_Info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-      VK_CHECK(vkCreateSemaphore(VK->Device, &Semaphore_Info, 0, VK->Image_Available_Semaphores + Frame_Index));
-      VK_CHECK(vkCreateSemaphore(VK->Device, &Semaphore_Info, 0, VK->Render_Finished_Semaphores + Frame_Index));
+      VK_CHECK(vkCreateSemaphore(VK->Device, &Semaphore_Info, 0, &Frame->Image_Available_Semaphore));
 
       VkFenceCreateInfo Fence_Info = {0};
       Fence_Info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
       Fence_Info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-      VK_CHECK(vkCreateFence(VK->Device, &Fence_Info, 0, VK->In_Flight_Fences + Frame_Index));
+      VK_CHECK(vkCreateFence(VK->Device, &Fence_Info, 0, &Frame->In_Flight_Fence));
+   }
+
+   VK->Render_Finished_Semaphores = Allocate(&VK->Arena, VkSemaphore, VK->Swapchain_Image_Count);
+   for(u32 Image_Index = 0; Image_Index < VK->Swapchain_Image_Count; ++Image_Index)
+   {
+      VkSemaphoreCreateInfo Semaphore_Info = {0};
+      Semaphore_Info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+      VK_CHECK(vkCreateSemaphore(VK->Device, &Semaphore_Info, 0, VK->Render_Finished_Semaphores + Image_Index));
    }
 
    // NOTE: Create framebuffer.
@@ -1057,16 +1077,22 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
    // NOTE: Clear temporary memory.
    Reset_Arena(&VK->Scratch);
 
+   if(!Result)
+   {
+      Destroy_Vulkan(VK);
+   }
+
    return(Result);
 }
 
 static RENDER_WITH_VULKAN(Render_With_Vulkan)
 {
-   VkFence *In_Flight_Fence = VK->In_Flight_Fences + VK->Frame_Index;
-   vkWaitForFences(VK->Device, 1, In_Flight_Fence, VK_TRUE, UINT64_MAX);
+   vulkan_frame *Frame = VK->Frames + VK->Frame_Index;
+
+   vkWaitForFences(VK->Device, 1, &Frame->In_Flight_Fence, VK_TRUE, UINT64_MAX);
 
    u32 Image_Index;
-   VkResult Image_Acquisition_Result = vkAcquireNextImageKHR(VK->Device, VK->Swapchain, UINT64_MAX, VK->Image_Available_Semaphores[VK->Frame_Index], VK_NULL_HANDLE, &Image_Index);
+   VkResult Image_Acquisition_Result = vkAcquireNextImageKHR(VK->Device, VK->Swapchain, UINT64_MAX, Frame->Image_Available_Semaphore, VK_NULL_HANDLE, &Image_Index);
    if(Image_Acquisition_Result == VK_ERROR_OUT_OF_DATE_KHR)
    {
       Recreate_Vulkan_Swapchain(VK);
@@ -1074,9 +1100,9 @@ static RENDER_WITH_VULKAN(Render_With_Vulkan)
    else
    {
       VK_CHECK(Image_Acquisition_Result);
-      vkResetFences(VK->Device, 1, In_Flight_Fence);
+      vkResetFences(VK->Device, 1, &Frame->In_Flight_Fence);
 
-      VkCommandBuffer Command_Buffer = VK->Command_Buffers[VK->Frame_Index];
+      VkCommandBuffer Command_Buffer = Frame->Command_Buffer;
       vkResetCommandBuffer(Command_Buffer, 0);
 
       // NOTE: Record render commands.
@@ -1118,7 +1144,7 @@ static RENDER_WITH_VULKAN(Render_With_Vulkan)
          Scissor.extent = VK->Swapchain_Extent;
          vkCmdSetScissor(Command_Buffer, 0, 1, &Scissor);
 
-         vkCmdBindDescriptorSets(Command_Buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, VK->Pipeline_Layout, 0, 1, VK->Descriptor_Sets + VK->Frame_Index, 0, 0);
+         vkCmdBindDescriptorSets(Command_Buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, VK->Pipeline_Layout, 0, 1, &Frame->Descriptor_Set, 0, 0);
 
          vkCmdDrawIndexed(Command_Buffer, Array_Count(Indices), 1, 0, 0, 0);
       }
@@ -1138,7 +1164,7 @@ static RENDER_WITH_VULKAN(Render_With_Vulkan)
       UBO.View = Look_At(Eye, Target);
       UBO.Projection = Perspective(VK->Swapchain_Extent.width, VK->Swapchain_Extent.height, 0.1f, 100.0f);
 
-      Copy_Memory(VK->Mapped_Uniform_Buffers[VK->Frame_Index], &UBO, sizeof(UBO));
+      Copy_Memory(Frame->Mapped_Uniform_Buffer, &UBO, sizeof(UBO));
 
       Delta += 0.25f * Frame_Seconds_Elapsed;
       if(Delta >= 1.0f) Delta -= 1.0f;
@@ -1147,7 +1173,7 @@ static RENDER_WITH_VULKAN(Render_With_Vulkan)
       VkSubmitInfo Submit_Info = {0};
       Submit_Info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 
-      VkSemaphore Wait_Semaphores[] = {VK->Image_Available_Semaphores[VK->Frame_Index]};
+      VkSemaphore Wait_Semaphores[] = {Frame->Image_Available_Semaphore};
       VkPipelineStageFlags Wait_Stages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
       Assert(Array_Count(Wait_Semaphores) == Array_Count(Wait_Stages));
 
@@ -1155,13 +1181,13 @@ static RENDER_WITH_VULKAN(Render_With_Vulkan)
       Submit_Info.pWaitSemaphores = Wait_Semaphores;
       Submit_Info.pWaitDstStageMask = Wait_Stages;
       Submit_Info.commandBufferCount = 1;
-      Submit_Info.pCommandBuffers = VK->Command_Buffers + VK->Frame_Index;
+      Submit_Info.pCommandBuffers = &Frame->Command_Buffer;
 
-      VkSemaphore Signal_Semaphores[] = {VK->Render_Finished_Semaphores[VK->Frame_Index]};
+      VkSemaphore Signal_Semaphores[] = {VK->Render_Finished_Semaphores[Image_Index]};
       Submit_Info.signalSemaphoreCount = Array_Count(Signal_Semaphores);
       Submit_Info.pSignalSemaphores = Signal_Semaphores;
 
-      VK_CHECK(vkQueueSubmit(VK->Graphics_Queue, 1, &Submit_Info, *In_Flight_Fence));
+      VK_CHECK(vkQueueSubmit(VK->Graphics_Queue, 1, &Submit_Info, Frame->In_Flight_Fence));
 
       VkPresentInfoKHR Present_Info = {0};
       Present_Info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -1196,21 +1222,22 @@ static DESTROY_VULKAN(Destroy_Vulkan)
    if(VK->Device)
    {
       vkDeviceWaitIdle(VK->Device);
+      for(u32 Image_Index = 0; Image_Index < VK->Swapchain_Image_Count; ++Image_Index)
+      {
+         vkDestroySemaphore(VK->Device, VK->Render_Finished_Semaphores[Image_Index], 0);
+      }
       for(int Frame_Index = 0; Frame_Index < MAX_FRAMES_IN_FLIGHT; ++Frame_Index)
       {
-         vkDestroySemaphore(VK->Device, VK->Render_Finished_Semaphores[Frame_Index], 0);
-         vkDestroySemaphore(VK->Device, VK->Image_Available_Semaphores[Frame_Index], 0);
-         vkDestroyFence(VK->Device, VK->In_Flight_Fences[Frame_Index], 0);
+         vulkan_frame *Frame = VK->Frames + Frame_Index;
+         vkDestroySemaphore(VK->Device, Frame->Image_Available_Semaphore, 0);
+         vkDestroyFence(VK->Device, Frame->In_Flight_Fence, 0);
+
+         vkDestroyBuffer(VK->Device, Frame->Uniform_Buffer, 0);
+         vkFreeMemory(VK->Device, Frame->Uniform_Buffer_Memory, 0);
       }
 
       Destroy_Vulkan_Swapchain(VK);
       vkDestroyCommandPool(VK->Device, VK->Command_Pool, 0);
-
-      for(int Frame_Index = 0; Frame_Index < MAX_FRAMES_IN_FLIGHT; ++Frame_Index)
-      {
-         vkDestroyBuffer(VK->Device, VK->Uniform_Buffers[Frame_Index], 0);
-         vkFreeMemory(VK->Device, VK->Uniform_Buffer_Memories[Frame_Index], 0);
-      }
 
       vkDestroySampler(VK->Device, VK->Texture_Sampler, 0);
       vkDestroyImageView(VK->Device, VK->Texture_Image_View, 0);

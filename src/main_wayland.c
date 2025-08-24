@@ -163,15 +163,18 @@ static inline void Toggle_Wayland_Fullscreen(wayland_context *Wayland)
 
 static inline float Compute_Wayland_Frame_Time(wayland_context *Wayland)
 {
-   // NOTE: This function assumes that either clock_gettime was called on
-   // Wayland->Frame_Start prior to the first time this is called, or else that
-   // the program is robust in the face of large time steps.
+   // NOTE: This frame time value is here so we have a reasonable value on
+   // the first iteration without needing to jump through multiple callback
+   // hoops to find the correct monitor refresh rate.
+   float Frame_Seconds_Elapsed = 1.0f / 60.0f;
 
    clock_gettime(CLOCK_MONOTONIC, &Wayland->Frame_End);
-   time_t Seconds_Elapsed = Wayland->Frame_End.tv_sec - Wayland->Frame_Start.tv_sec;
-   time_t Nanoseconds_Elapsed = Wayland->Frame_End.tv_nsec - Wayland->Frame_Start.tv_nsec;
-
-   float Frame_Seconds_Elapsed = Seconds_Elapsed + (1e-9 * Nanoseconds_Elapsed);
+   if(Wayland->Frame_Start.tv_sec || Wayland->Frame_Start.tv_nsec)
+   {
+      time_t Seconds_Elapsed = Wayland->Frame_End.tv_sec - Wayland->Frame_Start.tv_sec;
+      time_t Nanoseconds_Elapsed = Wayland->Frame_End.tv_nsec - Wayland->Frame_Start.tv_nsec;
+      Frame_Seconds_Elapsed = Seconds_Elapsed + (1e-9 * Nanoseconds_Elapsed);
+   }
 #if DEBUG
    if((Wayland->Frame_Count % 60) == 0)
    {
@@ -182,6 +185,88 @@ static inline float Compute_Wayland_Frame_Time(wayland_context *Wayland)
    Wayland->Frame_Count++;
 
    return(Frame_Seconds_Elapsed);
+}
+
+static int Create_Wayland_Shared_Memory_File(size Size)
+{
+   char Template[] = "/tmp/wayland-XXXXXX";
+
+   int Result = mkstemp(Template);
+   if(Result >= 0)
+   {
+      unlink(Template);
+      if(ftruncate(Result, Size) == 0)
+      {
+         // NOTE: Success.
+      }
+      else
+      {
+         close(Result);
+
+         Log("Failed to truncate shared memory file.\n");
+         Invalid_Code_Path;
+      }
+   }
+   else
+   {
+      Log("Failed to open shared memory file.\n");
+      Invalid_Code_Path;
+   }
+
+   return(Result);
+}
+
+static void Destroy_Wayland_Pixel_Buffers(wayland_context *Wayland)
+{
+   for(int Buffer_Index = 0; Buffer_Index < SHM_BUFFER_COUNT; ++Buffer_Index)
+   {
+      if(Wayland->Buffers[Buffer_Index])
+      {
+         wl_surface_attach(Wayland->Surface, 0, 0, 0);
+         wl_surface_commit(Wayland->Surface);
+         wl_buffer_destroy(Wayland->Buffers[Buffer_Index]);
+         Wayland->Buffers[Buffer_Index] = 0;
+      }
+   }
+   if(Wayland->Pool)
+   {
+      wl_shm_pool_destroy(Wayland->Pool);
+      Wayland->Pool = 0;
+   }
+   if(Wayland->Buffer_Pixels)
+   {
+      munmap(Wayland->Buffer_Pixels, Wayland->Shared_Memory_Size);
+      Wayland->Buffer_Pixels = 0;
+   }
+   if(Wayland->Shared_Memory_File > 0)
+   {
+      // NOTE: We're treating 0 as unitialized despite -1 maybe being more
+      // appropriate. In practice, if it's bigger than the std stream values
+      // we're probably good to close it.
+      close(Wayland->Shared_Memory_File);
+      Wayland->Shared_Memory_File = 0;
+   }
+}
+
+static void Create_Wayland_Pixel_Buffers(wayland_context *Wayland, int Width, int Height)
+{
+   Destroy_Wayland_Pixel_Buffers(Wayland);
+
+   int Stride = Width * sizeof(u32);
+   Wayland->Shared_Memory_Size = Stride * Height * SHM_BUFFER_COUNT;
+   Wayland->Shared_Memory_File = Create_Wayland_Shared_Memory_File(Wayland->Shared_Memory_Size);
+
+   Wayland->Buffer_Pixels = mmap(0, Wayland->Shared_Memory_Size, PROT_READ|PROT_WRITE, MAP_SHARED, Wayland->Shared_Memory_File, 0);
+   Wayland->Pool = wl_shm_create_pool(Wayland->Shared_Memory, Wayland->Shared_Memory_File, Wayland->Shared_Memory_Size);
+   for(int Buffer_Index = 0; Buffer_Index < SHM_BUFFER_COUNT; ++Buffer_Index)
+   {
+      size Offset = Stride * Height * Buffer_Index;
+      Wayland->Buffers[Buffer_Index] = wl_shm_pool_create_buffer(Wayland->Pool, Offset, Width, Height, Stride, WL_SHM_FORMAT_XRGB8888);
+
+      wl_surface_attach(Wayland->Surface, Wayland->Buffers[Buffer_Index], 0, 0);
+   }
+   wl_surface_damage(Wayland->Surface, 0, 0, Width, Height);
+   wl_surface_commit(Wayland->Surface);
 }
 
 // NOTE: Configure desktop base callbacks.
@@ -438,33 +523,11 @@ static const struct wl_registry_listener Registry_Listener =
 static void Destroy_Wayland(wayland_context *Wayland)
 {
    // NOTE: Destroy shared memory.
-   for(int Buffer_Index = 0; Buffer_Index < SHM_BUFFER_COUNT; ++Buffer_Index)
-   {
-      if(Wayland->Buffers[Buffer_Index])
-      {
-         wl_surface_attach(Wayland->Surface, 0, 0, 0);
-         wl_surface_commit(Wayland->Surface);
-         wl_buffer_destroy(Wayland->Buffers[Buffer_Index]);
-      }
-   }
-   if(Wayland->Pool)
-   {
-      wl_shm_pool_destroy(Wayland->Pool);
-   }
-   if(Wayland->Buffer_Pixels)
-   {
-      munmap(Wayland->Buffer_Pixels, Wayland->Shared_Memory_Size);
-   }
-   if(Wayland->Shared_Memory_File > 0)
-   {
-      // NOTE: We're treating 0 as unitialized despite -1 maybe being more
-      // appropriate. In practice, if it's bigger than the std stream values
-      // we're probably good to close it.
-      close(Wayland->Shared_Memory_File);
-   }
+   Destroy_Wayland_Pixel_Buffers(Wayland);
    if(Wayland->Shared_Memory)
    {
       wl_shm_destroy(Wayland->Shared_Memory);
+      Wayland->Shared_Memory = 0;
    }
 
    // NOTE: Destroy decorations.
@@ -514,35 +577,6 @@ static void Destroy_Wayland(wayland_context *Wayland)
    }
 }
 
-static int Create_Wayland_Shared_Memory_File(size Size)
-{
-   char Template[] = "/tmp/wayland-XXXXXX";
-
-   int Result = mkstemp(Template);
-   if(Result >= 0)
-   {
-      unlink(Template);
-      if(ftruncate(Result, Size) == 0)
-      {
-         // NOTE: Success.
-      }
-      else
-      {
-         close(Result);
-
-         Log("Failed to truncate shared memory file.\n");
-         Invalid_Code_Path;
-      }
-   }
-   else
-   {
-      Log("Failed to open shared memory file.\n");
-      Invalid_Code_Path;
-   }
-
-   return(Result);
-}
-
 static void Initialize_Wayland(wayland_context *Wayland, int Width, int Height)
 {
    Wayland->Display = wl_display_connect(0);
@@ -570,7 +604,7 @@ static void Initialize_Wayland(wayland_context *Wayland, int Width, int Height)
                if(Wayland->Desktop_Toplevel)
                {
                   xdg_toplevel_add_listener(Wayland->Desktop_Toplevel, &Desktop_Toplevel_Listener, Wayland);
-                  xdg_toplevel_set_title(Wayland->Desktop_Toplevel, "Vulkan Window (Wayland)\n");
+                  xdg_toplevel_set_title(Wayland->Desktop_Toplevel, "Vulkan Window (Wayland)");
 
                   // NOTE: Explicitly setting the min and max sizes to the same
                   // values is an indirect way of requesting a floating window
@@ -592,21 +626,7 @@ static void Initialize_Wayland(wayland_context *Wayland, int Width, int Height)
 
                   // NOTE: Set up a fallback buffer to draw into if we fail to
                   // initialize Vulkan.
-                  int Stride = Width * sizeof(u32);
-                  Wayland->Shared_Memory_Size = Stride * Height * SHM_BUFFER_COUNT;
-                  Wayland->Shared_Memory_File = Create_Wayland_Shared_Memory_File(Wayland->Shared_Memory_Size);
-
-                  Wayland->Buffer_Pixels = mmap(0, Wayland->Shared_Memory_Size, PROT_READ|PROT_WRITE, MAP_SHARED, Wayland->Shared_Memory_File, 0);
-                  Wayland->Pool = wl_shm_create_pool(Wayland->Shared_Memory, Wayland->Shared_Memory_File, Wayland->Shared_Memory_Size);
-                  for(int Buffer_Index = 0; Buffer_Index < SHM_BUFFER_COUNT; ++Buffer_Index)
-                  {
-                     size Offset = Stride * Height * Buffer_Index;
-                     Wayland->Buffers[Buffer_Index] = wl_shm_pool_create_buffer(Wayland->Pool, Offset, Width, Height, Stride, WL_SHM_FORMAT_XRGB8888);
-
-                     wl_surface_attach(Wayland->Surface, Wayland->Buffers[Buffer_Index], 0, 0);
-                     wl_surface_damage(Wayland->Surface, 0, 0, Width, Height);
-                     wl_surface_commit(Wayland->Surface);
-                  }
+                  Create_Wayland_Pixel_Buffers(Wayland, Width, Height);
 
                   Wayland->Running = true;
                }
@@ -643,31 +663,25 @@ int main(void)
 
    if(Initialize_Vulkan(&Wayland.VK, &Wayland))
    {
-      // NOTE: The default frame time value is just so we have a reasonable
-      // value on the first iteration without needing to jump through multiple
-      // callback hoops to find the correct monitor refresh rate.
-      float Frame_Seconds_Elapsed = 1.0f / 60.0f;
-      clock_gettime(CLOCK_MONOTONIC, &Wayland.Frame_Start);
-
       while(Wayland.Running)
       {
          // NOTE: Handle any received input events.
          wl_display_dispatch_pending(Wayland.Display);
 
-         // NOTE: Perform actual rendering work.
-         Render_With_Vulkan(&Wayland.VK, Frame_Seconds_Elapsed);
-
          // NOTE: Computing the frame time is only meaningful while we have
          // vsync active via VK_PRESENT_MODE_FIFO_KHR.
-         Frame_Seconds_Elapsed = Compute_Wayland_Frame_Time(&Wayland);
+         float Frame_Seconds_Elapsed = Compute_Wayland_Frame_Time(&Wayland);
+
+         // NOTE: Perform actual rendering work.
+         Render_With_Vulkan(&Wayland.VK, Frame_Seconds_Elapsed);
       }
+
+      Destroy_Vulkan(&Wayland.VK);
    }
    else
    {
       // NOTE: This is our fallback path to display a simple error message in
       // the case we fail to initialize Vulkan.
-      clock_gettime(CLOCK_MONOTONIC, &Wayland.Frame_Start);
-
       Create_Wayland_Frame_Callback(&Wayland);
       while(Wayland.Running)
       {
@@ -677,7 +691,6 @@ int main(void)
       }
    }
 
-   Destroy_Vulkan(&Wayland.VK);
    Destroy_Wayland(&Wayland);
 
    return(0);
