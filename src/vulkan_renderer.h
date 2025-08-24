@@ -73,6 +73,11 @@ typedef struct {
    VkImageView Texture_Image_View;
    VkSampler Texture_Sampler;
 
+   VkImage Depth_Image;
+   VkFormat Depth_Image_Format;
+   VkDeviceMemory Depth_Image_Memory;
+   VkImageView Depth_Image_View;
+
    VkCommandPool Command_Pool;
    vulkan_frame Frames[MAX_FRAMES_IN_FLIGHT];
 
