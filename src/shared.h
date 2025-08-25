@@ -2,6 +2,9 @@
 
 // NOTE: Anything not specific to Vulkan should be defined here.
 
+#define DEFAULT_RESOLUTION_WIDTH 640
+#define DEFAULT_RESOLUTION_HEIGHT 480
+
 #define Array_Count(Array) (size)(sizeof(Array) / sizeof((Array)[0]))
 #define Minimum(A, B) ((A) < (B) ? (A) : (B))
 #define Maximum(A, B) ((A) > (B) ? (A) : (B))

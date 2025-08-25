@@ -7,9 +7,6 @@
 #define VK_USE_PLATFORM_WAYLAND_KHR
 #include <vulkan/vulkan.h>
 
-#define DEFAULT_RESOLUTION_WIDTH 640
-#define DEFAULT_RESOLUTION_HEIGHT 480
-
 #include <fcntl.h>
 #include <linux/input-event-codes.h>
 #include <sys/stat.h>
