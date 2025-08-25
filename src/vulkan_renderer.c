@@ -77,6 +77,10 @@ static VkImageView Create_Vulkan_Image_View(vulkan_context *VK, VkImage Image, V
 
 static void Destroy_Vulkan_Swapchain(vulkan_context *VK)
 {
+   vkDestroyImageView(VK->Device, VK->Color_Image_View, 0);
+   vkDestroyImage(VK->Device, VK->Color_Image, 0);
+   vkFreeMemory(VK->Device, VK->Color_Image_Memory, 0);
+
    vkDestroyImageView(VK->Device, VK->Depth_Image_View, 0);
    vkDestroyImage(VK->Device, VK->Depth_Image, 0);
    vkFreeMemory(VK->Device, VK->Depth_Image_Memory, 0);
@@ -204,7 +208,7 @@ static void Create_Vulkan_Framebuffers(vulkan_context *VK)
    VK->Swapchain_Framebuffers = Allocate(&VK->Arena, VkFramebuffer, VK->Swapchain_Image_Count);
    for(u32 Image_Index = 0; Image_Index < VK->Swapchain_Image_Count; ++Image_Index)
    {
-      VkImageView Attachments[] = {VK->Swapchain_Image_Views[Image_Index], VK->Depth_Image_View};
+      VkImageView Attachments[] = {VK->Color_Image_View, VK->Depth_Image_View, VK->Swapchain_Image_Views[Image_Index]};
 
       VkFramebufferCreateInfo Framebuffer_Info = {0};
       Framebuffer_Info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
@@ -246,7 +250,9 @@ static u32 Get_Memory_Type(vulkan_context *VK, u32 Memory_Type_Bits, VkMemoryPro
    return(Memory_Type_Index);
 }
 
-static void Create_Vulkan_Image(vulkan_context *VK, VkImage *Image, VkDeviceMemory *Image_Memory, u32 Width, u32 Height, VkImageUsageFlags Usage, VkFormat Format, VkImageTiling Tiling, VkMemoryPropertyFlags Properties)
+static void Create_Vulkan_Image(vulkan_context *VK, VkImage *Image, VkDeviceMemory *Image_Memory,
+                                u32 Width, u32 Height, VkSampleCountFlagBits Sample_Count,
+                                VkImageUsageFlags Usage, VkFormat Format, VkImageTiling Tiling, VkMemoryPropertyFlags Properties)
 {
    VkImageCreateInfo Image_Info = {0};
    Image_Info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -261,7 +267,7 @@ static void Create_Vulkan_Image(vulkan_context *VK, VkImage *Image, VkDeviceMemo
    Image_Info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
    Image_Info.usage = Usage;
    Image_Info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-   Image_Info.samples = VK_SAMPLE_COUNT_1_BIT;
+   Image_Info.samples = Sample_Count;
    Image_Info.flags = 0;
 
    VK_CHECK(vkCreateImage(VK->Device, &Image_Info, 0, Image));
@@ -415,9 +421,20 @@ static void Create_Vulkan_Depth_Image(vulkan_context *VK)
       Assert((Properties.linearTilingFeatures & Features) == Features);
    }
 
-   Create_Vulkan_Image(VK, &VK->Depth_Image, &VK->Depth_Image_Memory, VK->Swapchain_Extent.width, VK->Swapchain_Extent.height, Usage, VK->Depth_Image_Format, Tiling, Memory_Properties);
+   Create_Vulkan_Image(VK, &VK->Depth_Image, &VK->Depth_Image_Memory, VK->Swapchain_Extent.width, VK->Swapchain_Extent.height, VK->Multisample_Count, Usage, VK->Depth_Image_Format, Tiling, Memory_Properties);
    VK->Depth_Image_View = Create_Vulkan_Image_View(VK, VK->Depth_Image, VK->Depth_Image_Format, VK_IMAGE_ASPECT_DEPTH_BIT);
    Transition_Vulkan_Image_Layout(VK, VK->Depth_Image, VK->Depth_Image_Format, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+}
+
+static void Create_Vulkan_Color_Image(vulkan_context *VK)
+{
+   VkFormat Format = VK->Swapchain_Image_Format;
+   VkImageUsageFlags Usage = VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT|VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+
+   Create_Vulkan_Image(VK, &VK->Color_Image, &VK->Color_Image_Memory, VK->Swapchain_Extent.width, VK->Swapchain_Extent.height, VK->Multisample_Count,
+                       Usage, Format, VK_IMAGE_TILING_OPTIMAL, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+   VK->Color_Image_View = Create_Vulkan_Image_View(VK, VK->Color_Image, Format, VK_IMAGE_ASPECT_COLOR_BIT);
 }
 
 static void Recreate_Vulkan_Swapchain(vulkan_context *VK)
@@ -428,6 +445,7 @@ static void Recreate_Vulkan_Swapchain(vulkan_context *VK)
    Destroy_Vulkan_Swapchain(VK);
    Create_Vulkan_Swapchain(VK);
    Create_Vulkan_Depth_Image(VK);
+   Create_Vulkan_Color_Image(VK);
    Create_Vulkan_Framebuffers(VK);
 }
 
@@ -544,7 +562,7 @@ static void Create_Vulkan_Texture_Image(vulkan_context *VK)
    VkImageUsageFlags Image_Usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT|VK_IMAGE_USAGE_SAMPLED_BIT;
    VkMemoryPropertyFlags Image_Properties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
    VkImageTiling Image_Tiling = VK_IMAGE_TILING_OPTIMAL;
-   Create_Vulkan_Image(VK, &VK->Texture_Image, &VK->Texture_Image_Memory, Texture_Width, Texture_Height, Image_Usage, Image_Format, Image_Tiling, Image_Properties);
+   Create_Vulkan_Image(VK, &VK->Texture_Image, &VK->Texture_Image_Memory, Texture_Width, Texture_Height, VK_SAMPLE_COUNT_1_BIT, Image_Usage, Image_Format, Image_Tiling, Image_Properties);
 
    VkFormat Format = VK_FORMAT_R8G8B8A8_SRGB;
    Transition_Vulkan_Image_Layout(VK, VK->Texture_Image, Format, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
@@ -649,6 +667,21 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
       }
    }
    Assert(VK->Physical_Device != VK_NULL_HANDLE);
+
+   VkSampleCountFlagBits Sample_Counts = (VK->Physical_Device_Properties.limits.framebufferColorSampleCounts &
+                                          VK->Physical_Device_Properties.limits.framebufferDepthSampleCounts);
+   if(Sample_Counts & VK_SAMPLE_COUNT_4_BIT)
+   {
+      VK->Multisample_Count = VK_SAMPLE_COUNT_4_BIT;
+   }
+   else if(Sample_Counts & VK_SAMPLE_COUNT_2_BIT)
+   {
+      VK->Multisample_Count = VK_SAMPLE_COUNT_2_BIT;
+   }
+   else
+   {
+      VK->Multisample_Count = VK_SAMPLE_COUNT_1_BIT;
+   }
 
 #ifdef VK_USE_PLATFORM_WAYLAND_KHR
    wayland_context *Wayland = (wayland_context *)Platform_Context;
@@ -861,7 +894,7 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
    VkPipelineMultisampleStateCreateInfo Multisample_Info = {0};
    Multisample_Info.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
    Multisample_Info.sampleShadingEnable = VK_FALSE;
-   Multisample_Info.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+   Multisample_Info.rasterizationSamples = VK->Multisample_Count;
    Multisample_Info.minSampleShading = 1.0f;
    Multisample_Info.pSampleMask = 0;
    Multisample_Info.alphaToCoverageEnable = VK_FALSE;
@@ -928,6 +961,7 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
    // NOTE: Create images.
    Create_Vulkan_Texture_Image(VK);
    Create_Vulkan_Depth_Image(VK);
+   Create_Vulkan_Color_Image(VK);
 
    // NOTE: Create samplers.
    Create_Vulkan_Texture_Sampler(VK, &VK->Texture_Sampler);
@@ -1045,23 +1079,33 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
    // NOTE: Initialize render pass.
    VkAttachmentDescription Color_Attachment = {0};
    Color_Attachment.format = VK->Swapchain_Image_Format;
-   Color_Attachment.samples = VK_SAMPLE_COUNT_1_BIT;
+   Color_Attachment.samples = VK->Multisample_Count;
    Color_Attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
    Color_Attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
    Color_Attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
    Color_Attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
    Color_Attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-   Color_Attachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+   Color_Attachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
    VkAttachmentDescription Depth_Attachment = {0};
    Depth_Attachment.format = VK->Depth_Image_Format;
-   Depth_Attachment.samples = VK_SAMPLE_COUNT_1_BIT;
+   Depth_Attachment.samples = VK->Multisample_Count;
    Depth_Attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
    Depth_Attachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
    Depth_Attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
    Depth_Attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
    Depth_Attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
    Depth_Attachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+   VkAttachmentDescription Color_Attachment_Resolve = {0};
+   Color_Attachment_Resolve.format = VK->Swapchain_Image_Format;
+   Color_Attachment_Resolve.samples = VK_SAMPLE_COUNT_1_BIT;
+   Color_Attachment_Resolve.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+   Color_Attachment_Resolve.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+   Color_Attachment_Resolve.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+   Color_Attachment_Resolve.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+   Color_Attachment_Resolve.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+   Color_Attachment_Resolve.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 
    VkAttachmentReference Color_Attachment_Reference = {0};
    Color_Attachment_Reference.attachment = 0;
@@ -1071,21 +1115,26 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
    Depth_Attachment_Reference.attachment = 1;
    Depth_Attachment_Reference.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
+   VkAttachmentReference Color_Attachment_Resolve_Reference = {0};
+   Color_Attachment_Resolve_Reference.attachment = 2;
+   Color_Attachment_Resolve_Reference.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
    VkSubpassDescription Subpass = {0};
    Subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
    Subpass.colorAttachmentCount = 1;
    Subpass.pColorAttachments = &Color_Attachment_Reference;
+   Subpass.pResolveAttachments = &Color_Attachment_Resolve_Reference;
    Subpass.pDepthStencilAttachment = &Depth_Attachment_Reference;
 
    VkSubpassDependency Subpass_Dependency = {0};
    Subpass_Dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
    Subpass_Dependency.dstSubpass = 0;
    Subpass_Dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT|VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-   Subpass_Dependency.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+   Subpass_Dependency.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT|VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
    Subpass_Dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT|VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
    Subpass_Dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT|VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
 
-   VkAttachmentDescription Attachments[] = {Color_Attachment, Depth_Attachment};
+   VkAttachmentDescription Attachments[] = {Color_Attachment, Depth_Attachment, Color_Attachment_Resolve};
 
    VkRenderPassCreateInfo Render_Pass_Info = {0};
    Render_Pass_Info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
@@ -1195,7 +1244,7 @@ static RENDER_WITH_VULKAN(Render_With_Vulkan)
 
       VK_CHECK(vkBeginCommandBuffer(Command_Buffer, &Buffer_Begin_Info));
 
-      VkClearColorValue Clear_Color = {{0, 0, 1, 1}};
+      VkClearColorValue Clear_Color = {{0, 0, 0, 1}};
       VkClearDepthStencilValue Clear_Stencil = {1, 0};
 
       VkClearValue Clear_Values[2] = {0};
@@ -1254,7 +1303,7 @@ static RENDER_WITH_VULKAN(Render_With_Vulkan)
 
       Copy_Memory(Frame->Mapped_Uniform_Buffer, &UBO, sizeof(UBO));
 
-      Delta += 0.25f * Frame_Seconds_Elapsed;
+      Delta += 0.025f * Frame_Seconds_Elapsed;
       if(Delta >= 1.0f) Delta -= 1.0f;
 
       // NOTE: Submit command buffer.

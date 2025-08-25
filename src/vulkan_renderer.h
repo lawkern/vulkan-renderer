@@ -52,6 +52,8 @@ typedef struct {
    VkFramebuffer *Swapchain_Framebuffers;
    VkSemaphore *Render_Finished_Semaphores;
 
+   VkSampleCountFlagBits Multisample_Count;
+
    VkShaderModule Vertex_Shader;
    VkShaderModule Fragment_Shader;
 
@@ -77,6 +79,10 @@ typedef struct {
    VkFormat Depth_Image_Format;
    VkDeviceMemory Depth_Image_Memory;
    VkImageView Depth_Image_View;
+
+   VkImage Color_Image;
+   VkDeviceMemory Color_Image_Memory;
+   VkImageView Color_Image_View;
 
    VkCommandPool Command_Pool;
    vulkan_frame Frames[MAX_FRAMES_IN_FLIGHT];
