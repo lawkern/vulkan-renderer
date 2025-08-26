@@ -23,7 +23,10 @@ wayland:
 
 win32:
 	mkdir -p build
-	$(CC) -o build/vulkan_renderer src/main_win32.c $(CFLAGS) -lgdi32
+	glslc shaders/basic.vert -o build/basic_vertex.spv
+	glslc shaders/basic.frag -o build/basic_fragment.spv
+
+	$(CC) -o build/vulkan_renderer src/main_win32.c $(CFLAGS) -lvulkan-1 -lm -lgdi32
 
 run:
 	cd build && ./vulkan_renderer

@@ -285,7 +285,7 @@ static void Configure_Desktop_Surface(void *Data, struct xdg_surface *Surface, u
    if(Wayland->Window_Width != Wayland->Previous_Window_Width ||
       Wayland->Window_Height != Wayland->Previous_Window_Height)
    {
-      Wayland->VK.Framebuffer_Resized = true;
+      Wayland->VK.Resize_Requested = true;
       Wayland->Previous_Window_Width = Wayland->Window_Width;
       Wayland->Previous_Window_Height = Wayland->Window_Height;
    }

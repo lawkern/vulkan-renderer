@@ -4,18 +4,88 @@
 // supported platform will have its code constrained to a single file, which
 // will quarantine the underlying platform from the renderer.
 
-#include <windows.h>
+#define VK_USE_PLATFORM_WIN32_KHR
+#include <vulkan/vulkan.h>
+
+#include <stdio.h>
+
 #include "shared.h"
 #include "platform.h"
+#include "vulkan_renderer.h"
 
 typedef struct {
+   HINSTANCE Instance;
    HWND Window;
+
+   LARGE_INTEGER Frequency;
+   LARGE_INTEGER Frame_Start;
+   LARGE_INTEGER Frame_End;
+   u64 Frame_Count;
+
    bool Running;
+   bool Rendering_Paused;
+
+   vulkan_context VK;
 } win32_context;
+
+#include "vulkan_renderer.c"
+
+static LOG(Log)
+{
+   static char Message[512];
+
+   va_list Arguments;
+   va_start(Arguments, Format);
+   vsnprintf(Message, sizeof(Message), Format, Arguments);
+   va_end(Arguments);
+
+   OutputDebugString(Message);
+}
 
 static READ_ENTIRE_FILE(Read_Entire_File)
 {
    string Result = {0};
+
+   WIN32_FIND_DATAA File_Data;
+   HANDLE Find_File = FindFirstFileA(Path, &File_Data);
+   if(Find_File == INVALID_HANDLE_VALUE)
+   {
+      Log("Failed to find file \"%s\".\n", Path);
+   }
+   else
+   {
+      FindClose(Find_File);
+
+      size Length = (File_Data.nFileSizeHigh * (MAXDWORD + 1)) + File_Data.nFileSizeLow;
+      Result.Data = VirtualAlloc(0, Length+1, MEM_COMMIT|MEM_RESERVE, PAGE_READWRITE);
+      if(!Result.Data)
+      {
+         Log("Failed to allocate memory for file \"%s\".\n", Path);
+      }
+      else
+      {
+         // NOTE(law): ReadFile is limited to reading 32-bit file sizes. As a
+         // result, the Win32 platform can't actually use the full 64-bit size
+         // file size defined in the non-platform code.
+
+         HANDLE File = CreateFileA(Path, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+         DWORD Bytes_Read;
+         if(ReadFile(File, Result.Data, (DWORD)Length, &Bytes_Read, 0) && Length == (size)Bytes_Read)
+         {
+            Result.Length = Length;
+            Result.Data[Length] = 0;
+         }
+         else
+         {
+            Log("Failed to read file \"%s.\"\n", Path);
+
+            VirtualFree(Result.Data, 0, MEM_RELEASE);
+            ZeroMemory(Result.Data, Length+1);
+         }
+         CloseHandle(File);
+      }
+   }
+
    return(Result);
 }
 
@@ -89,6 +159,8 @@ static bool Process_Win32_Keyboard(MSG Message)
       bool Pressed = (Transition_State == 0);
       bool Changed = (Previous_State == Transition_State);
 
+      win32_context *Win32 = (win32_context *)GetWindowLongPtr(Message.hwnd, GWLP_USERDATA);
+
       switch(Keycode)
       {
          case 'F':
@@ -109,7 +181,7 @@ static bool Process_Win32_Keyboard(MSG Message)
          case VK_ESCAPE: {
             if(Pressed && Changed)
             {
-               PostQuitMessage(0);
+               Win32->Running = false;
             }
          } break;
       }
@@ -121,6 +193,8 @@ static bool Process_Win32_Keyboard(MSG Message)
 LRESULT Win32_Window_Callback(HWND Window, UINT Message, WPARAM W_Param, LPARAM L_Param)
 {
    LRESULT Result = 0;
+
+   win32_context *Win32 = (win32_context *)GetWindowLongPtr(Window, GWLP_USERDATA);
    switch(Message)
    {
       case WM_CREATE: {
@@ -139,6 +213,21 @@ LRESULT Win32_Window_Callback(HWND Window, UINT Message, WPARAM W_Param, LPARAM 
          }
       } break;
 
+      case WM_SIZE: {
+         if(Win32)
+         {
+            if(W_Param == SIZE_MINIMIZED)
+            {
+               Win32->Rendering_Paused = true;
+            }
+            else
+            {
+               Win32->Rendering_Paused = false;
+               Win32->VK.Resize_Requested = true;
+            }
+         }
+      } break;
+
       case WM_PAINT: {
          PAINTSTRUCT Paint;
          HDC Device_Context = BeginPaint(Window, &Paint);
@@ -150,12 +239,12 @@ LRESULT Win32_Window_Callback(HWND Window, UINT Message, WPARAM W_Param, LPARAM 
          ReleaseDC(Window, Device_Context);
       } break;
 
-      case WM_CLOSE: {
-         DestroyWindow(Window);
-      } break;
-
+      case WM_QUIT:
       case WM_DESTROY: {
-         PostQuitMessage(0);
+         if(Win32)
+         {
+            Win32->Running = false;
+         }
       } break;
 
       default: {
@@ -166,15 +255,39 @@ LRESULT Win32_Window_Callback(HWND Window, UINT Message, WPARAM W_Param, LPARAM 
    return(Result);
 }
 
+static float Compute_Win32_Frame_Time(win32_context *Win32)
+{
+   float Frame_Seconds_Elapsed = 1.0f / 60.0f;
+
+   QueryPerformanceCounter(&Win32->Frame_End);
+   if(Win32->Frame_Start.QuadPart)
+   {
+      Frame_Seconds_Elapsed = ((float)(Win32->Frame_End.QuadPart - Win32->Frame_Start.QuadPart) / (float)Win32->Frequency.QuadPart);
+   }
+
+#if DEBUG
+   if((Win32->Frame_Count++ % 60) == 0)
+   {
+      Log("Frame Time: %fms \r", Frame_Seconds_Elapsed * 1000.0f);
+   }
+#endif
+
+   Win32->Frame_Start = Win32->Frame_End;
+   Win32->Frame_Count++;
+
+   return(Frame_Seconds_Elapsed);
+}
+
 static void Initialize_Win32(win32_context *Win32, int Show_Command)
 {
-   HINSTANCE Instance = GetModuleHandle(0);
+   Win32->Instance = GetModuleHandle(0);
+   QueryPerformanceFrequency(&Win32->Frequency);
 
    WNDCLASSEX Window_Class = {0};
    Window_Class.cbSize = sizeof(Window_Class);
    Window_Class.style = CS_HREDRAW|CS_VREDRAW;
    Window_Class.lpfnWndProc = Win32_Window_Callback;
-   Window_Class.hInstance = Instance;
+   Window_Class.hInstance = Win32->Instance;
    Window_Class.hIcon = 0;
    Window_Class.hCursor = LoadCursor(0, IDC_ARROW);
    Window_Class.lpszClassName = TEXT("Vulkan_Win32");
@@ -183,10 +296,12 @@ static void Initialize_Win32(win32_context *Win32, int Show_Command)
    {
       DWORD Window_Style = WS_OVERLAPPEDWINDOW;
       LPCSTR Window_Name = TEXT("Vulkan Renderer (Win32)");
-      Win32->Window = CreateWindowEx(0, Window_Class.lpszClassName, Window_Name, Window_Style, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, 0, 0, Instance, 0);
+      Win32->Window = CreateWindowEx(0, Window_Class.lpszClassName, Window_Name, Window_Style, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, 0, 0, Win32->Instance, 0);
 
       if(Win32->Window)
       {
+         SetWindowLongPtr(Win32->Window, GWLP_USERDATA, (LONG_PTR)Win32);
+
          ShowWindow(Win32->Window, Show_Command);
          UpdateWindow(Win32->Window);
 
@@ -200,21 +315,28 @@ int WinMain(HINSTANCE Instance, HINSTANCE Previous_Instance, LPSTR Command_Line,
    win32_context Win32 = {0};
    Initialize_Win32(&Win32, Show_Command);
 
-   while(Win32.Running)
+   if(Initialize_Vulkan(&Win32.VK, &Win32))
    {
-      MSG Message;
-      while(PeekMessage(&Message, 0, 0, 0, PM_REMOVE))
+      while(Win32.Running)
       {
-         if(!Process_Win32_Keyboard(Message))
+         MSG Message;
+         while(PeekMessage(&Message, 0, 0, 0, PM_REMOVE))
          {
-            if(Message.message == WM_QUIT)
+            if(!Process_Win32_Keyboard(Message))
             {
-               Win32.Running = false;
+               TranslateMessage(&Message);
+               DispatchMessage(&Message);
             }
-            TranslateMessage(&Message);
-            DispatchMessage(&Message);
+         }
+
+         float Frame_Seconds_Elapsed = Compute_Win32_Frame_Time(&Win32);
+         if(!Win32.Rendering_Paused)
+         {
+            Render_With_Vulkan(&Win32.VK, Frame_Seconds_Elapsed);
          }
       }
+
+      Destroy_Vulkan(&Win32.VK);
    }
 
    return(0);

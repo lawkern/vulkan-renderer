@@ -439,7 +439,6 @@ static void Create_Vulkan_Color_Image(vulkan_context *VK)
 
 static void Recreate_Vulkan_Swapchain(vulkan_context *VK)
 {
-   // TODO: Handle minimized windows with a width/height of zero.
    vkDeviceWaitIdle(VK->Device);
 
    Destroy_Vulkan_Swapchain(VK);
@@ -617,7 +616,7 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
    {
       VK_EXT_DEBUG_UTILS_EXTENSION_NAME,
       VK_KHR_SURFACE_EXTENSION_NAME,
-      VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME,
+      PLATFORM_SURFACE_EXTENSION_NAME,
    };
    Confirm_Vulkan_Instance_Extensions(Instance_Extension_Names, Array_Count(Instance_Extension_Names), VK->Scratch);
 
@@ -659,7 +658,7 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
 
       if(VK->Physical_Device == VK_NULL_HANDLE && Features.samplerAnisotropy == VK->Physical_Device_Enabled_Features.samplerAnisotropy)
       {
-         printf("Device Name: %s\n", Properties.deviceName);
+         Log("Device Name: %s\n", Properties.deviceName);
 
          VK->Physical_Device = Physical_Device;
          VK->Physical_Device_Properties = Properties;
@@ -683,8 +682,8 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
       VK->Multisample_Count = VK_SAMPLE_COUNT_1_BIT;
    }
 
-#ifdef VK_USE_PLATFORM_WAYLAND_KHR
-   wayland_context *Wayland = (wayland_context *)Platform_Context;
+#if defined(VK_USE_PLATFORM_WAYLAND_KHR)
+   wayland_context *Wayland = Platform_Context;
 
    VkWaylandSurfaceCreateInfoKHR Surface_Info = {0};
    Surface_Info.sType = VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR;
@@ -692,6 +691,15 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
    Surface_Info.surface = Wayland->Surface;
 
    VK_CHECK(vkCreateWaylandSurfaceKHR(VK->Instance, &Surface_Info, 0, &VK->Surface));
+#elif defined(VK_USE_PLATFORM_WIN32_KHR)
+   win32_context *Win32 = Platform_Context;
+
+   // Provided by VK_KHR_win32_surface
+   VkWin32SurfaceCreateInfoKHR Surface_Info = {0};
+   Surface_Info.sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR;
+   Surface_Info.hinstance = Win32->Instance;
+   Surface_Info.hwnd = Win32->Window;
+   VK_CHECK(vkCreateWin32SurfaceKHR(VK->Instance, &Surface_Info, 0, &VK->Surface));
 #else
 #  error Surface creation not yet implemented for this platform.
 #endif
@@ -1219,7 +1227,6 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
 static RENDER_WITH_VULKAN(Render_With_Vulkan)
 {
    vulkan_frame *Frame = VK->Frames + VK->Frame_Index;
-
    vkWaitForFences(VK->Device, 1, &Frame->In_Flight_Fence, VK_TRUE, UINT64_MAX);
 
    u32 Image_Index;
@@ -1230,7 +1237,14 @@ static RENDER_WITH_VULKAN(Render_With_Vulkan)
    }
    else
    {
-      VK_CHECK(Image_Acquisition_Result);
+      // NOTE: VK_SUBOPTIMAL_KHR is still a successful return code, so we can
+      // proceed with rendering this frame. We'll address it after presenting
+      // the frame by recreating the swapchain.
+      if(Image_Acquisition_Result != VK_SUBOPTIMAL_KHR)
+      {
+         VK_CHECK(Image_Acquisition_Result);
+      }
+
       vkResetFences(VK->Device, 1, &Frame->In_Flight_Fence);
 
       VkCommandBuffer Command_Buffer = Frame->Command_Buffer;
@@ -1338,9 +1352,9 @@ static RENDER_WITH_VULKAN(Render_With_Vulkan)
       Present_Info.pResults = 0;
 
       VkResult Present_Result = vkQueuePresentKHR(VK->Present_Queue, &Present_Info);
-      if(Present_Result == VK_ERROR_OUT_OF_DATE_KHR || Present_Result == VK_SUBOPTIMAL_KHR || VK->Framebuffer_Resized)
+      if(Present_Result == VK_ERROR_OUT_OF_DATE_KHR || Present_Result == VK_SUBOPTIMAL_KHR || VK->Resize_Requested)
       {
-         VK->Framebuffer_Resized = false;
+         VK->Resize_Requested = false;
          Recreate_Vulkan_Swapchain(VK);
       }
       else

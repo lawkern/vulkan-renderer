@@ -5,6 +5,14 @@
 
 #define MAX_FRAMES_IN_FLIGHT 2
 
+#if defined(VK_USE_PLATFORM_WAYLAND_KHR)
+#  define PLATFORM_SURFACE_EXTENSION_NAME VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME
+#elif defined(VK_USE_PLATFORM_WIN32_KHR)
+#  define PLATFORM_SURFACE_EXTENSION_NAME VK_KHR_WIN32_SURFACE_EXTENSION_NAME
+#else
+#  error Support for this platform has not been implemented yet.
+#endif
+
 typedef struct {
    vec3 Position;
    vec3 Color;
@@ -96,7 +104,7 @@ typedef struct {
    VkQueue Present_Queue;
 
    u32 Frame_Index;
-   bool Framebuffer_Resized;
+   bool Resize_Requested;
 } vulkan_context;
 
 #define VK_CHECK(Result)                                                \
@@ -104,7 +112,7 @@ typedef struct {
       VkResult Err = (Result);                                          \
       if(Err != VK_SUCCESS)                                             \
       {                                                                 \
-         fprintf(stderr, "Vulkan Error: %s\n", string_VkResult(Err));   \
+         Log("Vulkan result check failed: %s\n", string_VkResult(Err)); \
          Invalid_Code_Path;                                             \
       }                                                                 \
    } while(0)

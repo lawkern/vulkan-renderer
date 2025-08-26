@@ -34,6 +34,7 @@ typedef struct {
    u8 *Data;
 } string;
 
+#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 
