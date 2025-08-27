@@ -1,6 +1,7 @@
 /* (c) copyright 2025 Lawrence D. Kern /////////////////////////////////////// */
 
-#include "data.c"
+#include "asset_data.c"
+#include "asset_parser.c"
 
 static bool Vulkan_Extensions_Supported(VkExtensionProperties *Extensions, u32 Extension_Count, const char **Required_Names, u32 Required_Count)
 {
@@ -604,6 +605,9 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
    VK->Platform_Context = Platform_Context;
    VK->Arena = Make_Arena(Megabytes(256));
    VK->Scratch = Make_Arena(Megabytes(256));
+
+   // NOTE: Load assets.
+   Parse_GLB(&VK->Arena, VK->Scratch, "../data/cube.glb");
 
    // NOTE: Initialize the Vulkan instance.
    VkApplicationInfo Application_Info = {0};
