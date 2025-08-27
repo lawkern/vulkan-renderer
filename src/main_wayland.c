@@ -87,53 +87,76 @@ static READ_ENTIRE_FILE(Read_Entire_File)
    string Result = {0};
 
    struct stat File_Information;
-   if(stat(Path, &File_Information) == 0)
-   {
-      int File = open(Path, O_RDONLY);
-      if(File != -1)
-      {
-         size Total_Size = File_Information.st_size;
-         Result.Data = mmap(0, Total_Size+1, PROT_READ|PROT_WRITE, MAP_ANONYMOUS|MAP_PRIVATE, -1, 0);
-         if(Result.Data)
-         {
-            while(Result.Length < Total_Size)
-            {
-               size Single_Read = read(File, Result.Data+Result.Length, Total_Size-Result.Length);
-               if(Single_Read == 0)
-               {
-                  break; // Done.
-               }
-               else if(Single_Read == -1)
-               {
-                  Log("Failed to read file %s.\n", Path);
-                  break;
-               }
-               else
-               {
-                  Result.Length += Single_Read;
-               }
-            }
-            Assert(Result.Length == Total_Size);
-
-            // NOTE: Null terminate.
-            Result.Data[Result.Length] = 0;
-         }
-         else
-         {
-            Log("Failed to allocate file %s.\n", Path);
-         }
-      }
-      else
-      {
-         Log("Failed to open file %s.\n", Path);
-      }
-   }
-   else
+   if(stat(Path, &File_Information) != 0)
    {
       Log("Failed to determine size of file %s.\n", Path);
    }
+   else
+   {
+      int File = open(Path, O_RDONLY);
+      if(File == -1)
+      {
+         Log("Failed to open file %s.\n", Path);
+      }
+      else
+      {
+         size Total_Size = File_Information.st_size;
+
+         // NOTE: Add an extra byte to the allocation for a null terminator.
+         u8 *Data = mmap(0, Total_Size+1, PROT_READ|PROT_WRITE, MAP_ANONYMOUS|MAP_PRIVATE, -1, 0);
+         if(!Data)
+         {
+            Log("Failed to allocate file %s.\n", Path);
+         }
+         else
+         {
+            size Length = 0;
+            while(Length < Total_Size)
+            {
+               size Single_Read = read(File, Data+Length, Total_Size-Length);
+               if(Single_Read == 0)
+               {
+                  break; // NOTE: Done.
+               }
+               else if(Single_Read == -1)
+               {
+                  break; // NOTE: Failed read, number of bytes read is checked below.
+               }
+               else
+               {
+                  Length += Single_Read;
+               }
+            }
+
+            if(Length != Total_Size)
+            {
+               Log("Failed to read entire file %s, (%lu of %lu bytes read).\n", Path, Length, Total_Size);
+               Free_Entire_File(Data, Total_Size);
+            }
+            else
+            {
+               // NOTE: Null terminate.
+               Data[Length] = 0;
+
+               // NOTE: Success.
+               Result.Data = Data;
+               Result.Length = Length;
+            }
+         }
+      }
+   }
 
    return(Result);
+}
+
+static FREE_ENTIRE_FILE(Free_Entire_File)
+{
+   // NOTE: This assumes we added an extra byte for the null terminator when
+   // allocating file memory.
+   if(munmap(Data, Length+1) == -1)
+   {
+      Log("Failed to unmap loaded file.\n");
+   }
 }
 
 static GET_WINDOW_DIMENSIONS(Get_Window_Dimensions)
@@ -476,19 +499,19 @@ static void Global_Registry(void *Data, struct wl_registry *Registry, u32 ID, co
    // Log("%s v%u: %u\n", Interface, Version, ID);
 
    wayland_context *Wayland = Data;
-   if(Strings_Are_Equal(Interface, wl_compositor_interface.name))
+   if(C_Strings_Are_Equal(Interface, wl_compositor_interface.name))
    {
       Wayland->Compositor = wl_registry_bind(Registry, ID, &wl_compositor_interface, 4);
    }
-   else if(Strings_Are_Equal(Interface, xdg_wm_base_interface.name))
+   else if(C_Strings_Are_Equal(Interface, xdg_wm_base_interface.name))
    {
       Wayland->Desktop_Base = wl_registry_bind(Registry, ID, &xdg_wm_base_interface, 1);
    }
-   else if(Strings_Are_Equal(Interface, zxdg_decoration_manager_v1_interface.name))
+   else if(C_Strings_Are_Equal(Interface, zxdg_decoration_manager_v1_interface.name))
    {
       Wayland->Decoration_Manager = wl_registry_bind(Registry, ID, &zxdg_decoration_manager_v1_interface, 1);
    }
-   else if(Strings_Are_Equal(Interface, wl_seat_interface.name))
+   else if(C_Strings_Are_Equal(Interface, wl_seat_interface.name))
    {
       Wayland->Seat = wl_registry_bind(Registry, ID, &wl_seat_interface, 1);
       if(Wayland->Seat)
@@ -502,7 +525,7 @@ static void Global_Registry(void *Data, struct wl_registry *Registry, u32 ID, co
          }
       }
    }
-   else if(Strings_Are_Equal(Interface, wl_shm_interface.name))
+   else if(C_Strings_Are_Equal(Interface, wl_shm_interface.name))
    {
       Wayland->Shared_Memory = wl_registry_bind(Registry, ID, &wl_shm_interface, 1);
    }

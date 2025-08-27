@@ -12,7 +12,7 @@ static bool Vulkan_Extensions_Supported(VkExtensionProperties *Extensions, u32 E
       bool Found = false;
       for(u32 Available_Index = 0; Available_Index < Extension_Count; ++Available_Index)
       {
-         if(Strings_Are_Equal(Required_Name, Extensions[Available_Index].extensionName))
+         if(C_Strings_Are_Equal(Required_Name, Extensions[Available_Index].extensionName))
          {
             Found = true;
             break;
@@ -607,7 +607,8 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
    VK->Scratch = Make_Arena(Megabytes(256));
 
    // NOTE: Load assets.
-   Parse_GLB(&VK->Arena, VK->Scratch, "../data/cube.glb");
+   gltf_scene Scene = {0};
+   Parse_GLB(&Scene, &VK->Arena, VK->Scratch, "../data/cube.glb");
 
    // NOTE: Initialize the Vulkan instance.
    VkApplicationInfo Application_Info = {0};

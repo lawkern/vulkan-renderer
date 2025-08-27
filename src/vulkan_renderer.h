@@ -3,6 +3,8 @@
 #include <vulkan/vulkan.h>
 #include <vulkan/vk_enum_string_helper.h>
 
+#include "asset_parser.h"
+
 #define MAX_FRAMES_IN_FLIGHT 2
 
 #if defined(VK_USE_PLATFORM_WAYLAND_KHR)
