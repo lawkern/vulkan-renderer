@@ -12,7 +12,8 @@ WARNINGS = -Wall -Wextra\
 WL_PROTOCOLS  = $$(pkg-config wayland-protocols --variable=pkgdatadir)
 WL_CLIENT     = $$(pkg-config wayland-client --cflags --libs)
 
-compile: shaders wayland
+# compile: shaders wayland
+compile: shaders xlib
 # compile: shaders win32
 
 shaders:
@@ -28,6 +29,9 @@ wayland:
 	eval wayland-scanner private-code  < $(WL_PROTOCOLS)/unstable/xdg-decoration/xdg-decoration-unstable-v1.xml > src/external/xdg-decoration-unstable-v1-protocol.c
 
 	eval $(CC) -o build/vulkan_renderer src/main_wayland.c $(CFLAGS) $(LDLIBS) -lvulkan $(WL_CLIENT)
+
+xlib:
+	eval $(CC) -o build/vulkan_renderer src/main_xlib.c $(CFLAGS) $(LDLIBS) -lvulkan -lX11
 
 win32:
 	eval $(CC) -o build/vulkan_renderer src/main_win32.c $(CFLAGS) $(LDLIBS) -lvulkan-1 -lgdi32

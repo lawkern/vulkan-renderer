@@ -70,94 +70,7 @@ typedef struct {
 #include "vulkan_renderer.c"
 
 // NOTE: Platform API implementations.
-static LOG(Log)
-{
-   va_list Arguments;
-
-   va_start(Arguments, Format);
-   vprintf(Format, Arguments);
-   va_end(Arguments);
-
-   // NOTE: Flush so that \r functions properly.
-   fflush(stdout);
-}
-
-static READ_ENTIRE_FILE(Read_Entire_File)
-{
-   string Result = {0};
-
-   struct stat File_Information;
-   if(stat(Path, &File_Information) != 0)
-   {
-      Log("Failed to determine size of file %s.\n", Path);
-   }
-   else
-   {
-      int File = open(Path, O_RDONLY);
-      if(File == -1)
-      {
-         Log("Failed to open file %s.\n", Path);
-      }
-      else
-      {
-         size Total_Size = File_Information.st_size;
-
-         // NOTE: Add an extra byte to the allocation for a null terminator.
-         u8 *Data = mmap(0, Total_Size+1, PROT_READ|PROT_WRITE, MAP_ANONYMOUS|MAP_PRIVATE, -1, 0);
-         if(!Data)
-         {
-            Log("Failed to allocate file %s.\n", Path);
-         }
-         else
-         {
-            size Length = 0;
-            while(Length < Total_Size)
-            {
-               size Single_Read = read(File, Data+Length, Total_Size-Length);
-               if(Single_Read == 0)
-               {
-                  break; // NOTE: Done.
-               }
-               else if(Single_Read == -1)
-               {
-                  break; // NOTE: Failed read, number of bytes read is checked below.
-               }
-               else
-               {
-                  Length += Single_Read;
-               }
-            }
-
-            if(Length != Total_Size)
-            {
-               Log("Failed to read entire file %s, (%lu of %lu bytes read).\n", Path, Length, Total_Size);
-               Free_Entire_File(Data, Total_Size);
-            }
-            else
-            {
-               // NOTE: Null terminate.
-               Data[Length] = 0;
-
-               // NOTE: Success.
-               Result.Data = Data;
-               Result.Length = Length;
-            }
-         }
-      }
-   }
-
-   return(Result);
-}
-
-static FREE_ENTIRE_FILE(Free_Entire_File)
-{
-   // NOTE: This assumes we added an extra byte for the null terminator when
-   // allocating file memory.
-   if(munmap(Data, Length+1) == -1)
-   {
-      Log("Failed to unmap loaded file.\n");
-   }
-}
+#include "platform_linux.c"
 
 static GET_WINDOW_DIMENSIONS(Get_Window_Dimensions)
 {
@@ -179,32 +92,6 @@ static inline void Toggle_Wayland_Fullscreen(wayland_context *Wayland)
       xdg_toplevel_unset_fullscreen(Wayland->Desktop_Toplevel);
    }
    Fullscreen = !Fullscreen;
-}
-
-static inline float Compute_Wayland_Frame_Time(wayland_context *Wayland)
-{
-   // NOTE: This frame time value is here so we have a reasonable value on
-   // the first iteration without needing to jump through multiple callback
-   // hoops to find the correct monitor refresh rate.
-   float Frame_Seconds_Elapsed = 1.0f / 60.0f;
-
-   clock_gettime(CLOCK_MONOTONIC, &Wayland->Frame_End);
-   if(Wayland->Frame_Start.tv_sec || Wayland->Frame_Start.tv_nsec)
-   {
-      time_t Seconds_Elapsed = Wayland->Frame_End.tv_sec - Wayland->Frame_Start.tv_sec;
-      time_t Nanoseconds_Elapsed = Wayland->Frame_End.tv_nsec - Wayland->Frame_Start.tv_nsec;
-      Frame_Seconds_Elapsed = Seconds_Elapsed + (1e-9 * Nanoseconds_Elapsed);
-   }
-#if DEBUG
-   if((Wayland->Frame_Count % 60) == 0)
-   {
-      Log("Frame Time: %fms \r", Frame_Seconds_Elapsed * 1000.0f);
-   }
-#endif
-   Wayland->Frame_Start = Wayland->Frame_End;
-   Wayland->Frame_Count++;
-
-   return(Frame_Seconds_Elapsed);
 }
 
 static int Create_Wayland_Shared_Memory_File(size Size)
@@ -485,7 +372,7 @@ static void Create_Wayland_Frame_Callback(wayland_context *Wayland)
    Wayland->Buffer_Index %= SHM_BUFFER_COUNT;
 
    // NOTE: This is here to print the frame time, the value isn't important.
-   Compute_Wayland_Frame_Time(Wayland);
+   Compute_Seconds_Elapsed(&Wayland->Frame_Start, &Wayland->Frame_End);
 
    struct wl_callback *Next_Callback = wl_surface_frame(Wayland->Surface);
    wl_callback_add_listener(Next_Callback, &Frame_Listener, Wayland);
@@ -690,7 +577,7 @@ int main(void)
 
          // NOTE: Computing the frame time is only meaningful while we have
          // vsync active via VK_PRESENT_MODE_FIFO_KHR.
-         float Frame_Seconds_Elapsed = Compute_Wayland_Frame_Time(&Wayland);
+         float Frame_Seconds_Elapsed = Compute_Seconds_Elapsed(&Wayland.Frame_Start, &Wayland.Frame_End);
 
          // NOTE: Perform actual rendering work.
          Render_With_Vulkan(&Wayland.VK, Frame_Seconds_Elapsed);

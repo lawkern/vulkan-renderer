@@ -1,6 +1,6 @@
 /* (c) copyright 2025 Lawrence D. Kern /////////////////////////////////////// */
 
-#include "asset_data.c"
+#include "debug_data.c"
 #include "asset_parser.c"
 
 static bool Vulkan_Extensions_Supported(VkExtensionProperties *Extensions, u32 Extension_Count, const char **Required_Names, u32 Required_Count)
@@ -112,7 +112,8 @@ static void Create_Vulkan_Swapchain(vulkan_context *VK)
    for(u32 Format_Index = 0; Format_Index < Surface_Format_Count; ++Format_Index)
    {
       VkSurfaceFormatKHR Option = Surface_Formats[Format_Index];
-      if(Option.format == VK_FORMAT_R8G8B8A8_SRGB && Option.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
+      if((Option.format == VK_FORMAT_R8G8B8A8_SRGB || Option.format == VK_FORMAT_B8G8R8A8_SRGB) &&
+         Option.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
       {
          Desired_Format = Option;
          Desired_Format_Supported = true;
@@ -695,6 +696,15 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
    Surface_Info.surface = Wayland->Surface;
 
    VK_CHECK(vkCreateWaylandSurfaceKHR(VK->Instance, &Surface_Info, 0, &VK->Surface));
+#elif defined(VK_USE_PLATFORM_XLIB_KHR)
+   xlib_context *Xlib = Platform_Context;
+
+   // Provided by VK_KHR_win32_surface
+   VkXlibSurfaceCreateInfoKHR Surface_Info = {0};
+   Surface_Info.sType = VK_STRUCTURE_TYPE_XLIB_SURFACE_CREATE_INFO_KHR;
+   Surface_Info.dpy = Xlib->Display;
+   Surface_Info.window = Xlib->Window;
+   VK_CHECK(vkCreateXlibSurfaceKHR(VK->Instance, &Surface_Info, 0, &VK->Surface));
 #elif defined(VK_USE_PLATFORM_WIN32_KHR)
    win32_context *Win32 = Platform_Context;
 
