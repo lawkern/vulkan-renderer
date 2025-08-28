@@ -6,6 +6,7 @@
 
 // NOTE: Basic JSON parsing API.
 static string Find_Json_Array(string Json, string Key);
+static string Find_Json_Object(string Json, string Key);
 static int Json_Array_Count(string Array);
 static string Next_Json_Object(string Json);
 static int Find_Json_Integer(string Json, string Key);
@@ -47,10 +48,11 @@ static void Parse_GLB(gltf_scene *Result, arena *Arena, arena Scratch, char *Pat
    }
    At += sizeof(*Binary_Header);
 
-   string Binary = Copy_String(Arena, At, Binary_Header->Chunk_Length);
-   At += Binary.Length;
+   Result->Binary_Size = Binary_Header->Chunk_Length;
+   Result->Binary_Data = Allocate(Arena, u8, Result->Binary_Size);
+   Copy_Memory(Result->Binary_Data, At, Result->Binary_Size);
 
-   // Log("%.*s\n", (int)Json.Length, Json.Data);
+   At += Result->Binary_Size;
 
 #  define KEY(Literal) S("\"" Literal "\"")
 
@@ -102,6 +104,62 @@ static void Parse_GLB(gltf_scene *Result, arena *Arena, arena Scratch, char *Pat
          Json_Buffer_Views = Next_Json_Object(Json_Buffer_Views);
       }
    }
+
+   // NOTE: Parse buffers.
+   string Json_Buffers = Find_Json_Array(Json, KEY("buffers"));
+   if(Json_Buffers.Length)
+   {
+      Result->Buffer_Count = Json_Array_Count(Json_Buffers);
+      Result->Buffers = Allocate(Arena, gltf_buffer, Result->Buffer_Count);
+
+      for(int Buffer_Index = 0; Buffer_Index < Result->Buffer_Count; ++Buffer_Index)
+      {
+         gltf_buffer *Buffer = Result->Buffers + Buffer_Index;
+         Buffer->Length = Find_Json_Integer(Json_Buffers, KEY("byteLength"));
+
+         Json_Buffers = Next_Json_Object(Json_Buffers);
+      }
+   }
+
+   // NOTE: Parse meshes.
+   string Json_Meshes = Find_Json_Array(Json, KEY("meshes"));
+   if(Json_Meshes.Length)
+   {
+      Result->Mesh_Count = Json_Array_Count(Json_Meshes);
+      Result->Meshes = Allocate(Arena, gltf_mesh, Json_Meshes.Length);
+
+      for(int Mesh_Index = 0; Mesh_Index < Result->Mesh_Count; ++Mesh_Index)
+      {
+         gltf_mesh *Mesh = Result->Meshes + Mesh_Index;
+
+         string Json_Primitives = Find_Json_Array(Json_Meshes, KEY("primitives"));
+         if(Json_Primitives.Length)
+         {
+            Mesh->Primitive_Count = Json_Array_Count(Json_Primitives);
+            Mesh->Primitives = Allocate(Arena, gltf_primitive, Mesh->Primitive_Count);
+
+            for(int Primitive_Index = 0; Primitive_Index < Mesh->Primitive_Count; ++Primitive_Index)
+            {
+               gltf_primitive *Primitive = Mesh->Primitives + Primitive_Index;
+               Primitive->Indices = Find_Json_Integer(Json_Primitives, KEY("indices"));
+
+               string Json_Attributes = Find_Json_Object(Json_Primitives, KEY("attributes"));
+               if(Json_Attributes.Length)
+               {
+                  Primitive->Position   = Find_Json_Integer(Json_Attributes, KEY("POSITION"));
+                  Primitive->Normal     = Find_Json_Integer(Json_Attributes, KEY("NORMAL"));
+                  Primitive->Texcoord_0 = Find_Json_Integer(Json_Attributes, KEY("TEXCOORD_0"));
+                  Primitive->Texcoord_1 = Find_Json_Integer(Json_Attributes, KEY("TEXCOORD_1"));
+                  Primitive->Color_0    = Find_Json_Integer(Json_Attributes, KEY("COLOR_0"));
+                  Primitive->Color_1    = Find_Json_Integer(Json_Attributes, KEY("COLOR_1"));
+               }
+
+               Json_Primitives = Next_Json_Object(Json_Primitives);
+            }
+         }
+      }
+   }
+
 #  undef KEY
 
    Free_Entire_File(File.Data, File.Length);
@@ -175,6 +233,51 @@ static string Find_Json_Array(string Json, string Key)
       else
       {
          Result = Span_String(Array.Data, Pos-1); // NOTE: Don't include trailing bracket.
+      }
+   }
+
+   return(Result);
+}
+
+static string Find_Json_Object(string Json, string Key)
+{
+   // NOTE: Return a string containing the contents of a JSON object with the
+   // specified key. The result does not include the enclosing braces.
+
+   // NOTE: This function assumes the key is unique - the same key in a nested
+   // object earlier in the JSON string will interfere with this lookup.
+
+   string Result = {0};
+
+   string Object = Find_Json_By_Key(Json, Key);
+   if(Object.Length && Has_Prefix_Then_Remove(&Object, S("{")))
+   {
+      u8 *Pos = Object.Data;
+      u8 *End = Object.Data + Object.Length;
+
+      bool In_String = false;
+      int Braces = 1;
+      while(Pos < End && Pos[0] && Braces > 0)
+      {
+         if(Pos[0] == '"' && (Pos == Object.Data || Pos[-1] != '\\'))
+         {
+            In_String = !In_String;
+         }
+         else if(!In_String)
+         {
+            if     (Pos[0] == '{') Braces++;
+            else if(Pos[0] == '}') Braces--;
+         }
+         Pos++;
+      }
+
+      if(Braces != 0)
+      {
+         Log("JSON objects %.*s was not braced properly.\n", (int)Key.Length, Key.Data);
+      }
+      else
+      {
+         Result = Span_String(Object.Data, Pos-1); // NOTE: Don't include trailing bracket.
       }
    }
 

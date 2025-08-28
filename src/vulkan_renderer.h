@@ -51,6 +51,7 @@ typedef struct {
    void *Platform_Context;
    arena Arena;
    arena Scratch;
+   gltf_scene Scene;
 
    VkSwapchainKHR Swapchain;
    VkExtent2D Swapchain_Extent;

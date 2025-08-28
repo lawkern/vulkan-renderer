@@ -59,8 +59,10 @@ typedef struct {
 typedef struct {
    int Position;
    int Normal;
-   int Texcoord;
-   int Color;
+   int Texcoord_0;
+   int Texcoord_1;
+   int Color_0;
+   int Color_1;
    int Indices;
 } gltf_primitive;
 

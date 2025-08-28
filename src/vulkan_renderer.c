@@ -607,8 +607,7 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
    VK->Scratch = Make_Arena(Megabytes(256));
 
    // NOTE: Load assets.
-   gltf_scene Scene = {0};
-   Parse_GLB(&Scene, &VK->Arena, VK->Scratch, "../data/cube.glb");
+   Parse_GLB(&VK->Scene, &VK->Arena, VK->Scratch, "../data/cube.glb");
 
    // NOTE: Initialize the Vulkan instance.
    VkApplicationInfo Application_Info = {0};
