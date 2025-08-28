@@ -146,17 +146,25 @@ static void Create_Vulkan_Swapchain(vulkan_context *VK)
    }
    // Assert(Desired_Present_Mode_Found);
 
-   VK->Swapchain_Extent = Surface_Capabilities.currentExtent;
-   if(VK->Swapchain_Extent.width == UINT32_MAX && VK->Swapchain_Extent.height == UINT32_MAX)
+   VkExtent2D New_Extent = Surface_Capabilities.currentExtent;
+   if(New_Extent.width == UINT32_MAX && New_Extent.height == UINT32_MAX)
    {
       // NOTE: UINT32_MAX is a special case that allows us to specify our own
       // extent dimensions.
       int Width, Height;
       Get_Window_Dimensions(VK->Platform_Context, &Width, &Height);
 
-      VK->Swapchain_Extent.width = Minimum(Maximum((u32)Width, Surface_Capabilities.minImageExtent.width), Surface_Capabilities.maxImageExtent.width);
-      VK->Swapchain_Extent.height = Minimum(Maximum((u32)Height, Surface_Capabilities.minImageExtent.height), Surface_Capabilities.maxImageExtent.height);
+      New_Extent.width = Width;
+      New_Extent.height = Height;
    }
+
+   u32 Min_Width  = Surface_Capabilities.minImageExtent.width;
+   u32 Max_Width  = Surface_Capabilities.maxImageExtent.width;
+   u32 Min_Height = Surface_Capabilities.minImageExtent.height;
+   u32 Max_Height = Surface_Capabilities.maxImageExtent.height;
+
+   VK->Swapchain_Extent.width = Minimum(Maximum(New_Extent.width, Min_Width), Max_Width);
+   VK->Swapchain_Extent.height = Minimum(Maximum(New_Extent.height, Min_Height), Max_Height);
 
    u32 Image_Count = Surface_Capabilities.minImageCount + 1;
    if(Surface_Capabilities.maxImageCount && Surface_Capabilities.maxImageCount < Image_Count)

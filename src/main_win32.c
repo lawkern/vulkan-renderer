@@ -78,8 +78,8 @@ static READ_ENTIRE_FILE(Read_Entire_File)
          else
          {
             Log("Failed to read file \"%s.\"\n", Path);
+            Free_Entire_File(Result.Data, Result.Length);
 
-            VirtualFree(Result.Data, 0, MEM_RELEASE);
             ZeroMemory(Result.Data, Length+1);
          }
          CloseHandle(File);
@@ -89,13 +89,22 @@ static READ_ENTIRE_FILE(Read_Entire_File)
    return(Result);
 }
 
+static FREE_ENTIRE_FILE(Free_Entire_File)
+{
+   if(!VirtualFree(Data, 0, MEM_RELEASE))
+   {
+      Log("Failed to free file.\n");
+   }
+}
+
 static void Get_Win32_Window_Dimensions(HWND Window, int *Width, int *Height)
 {
    RECT Client_Rect;
-   GetClientRect(Window, &Client_Rect);
-
-   *Width  = Client_Rect.right - Client_Rect.left;
-   *Height  = Client_Rect.bottom - Client_Rect.top;
+   if(GetClientRect(Window, &Client_Rect))
+   {
+      *Width  = Client_Rect.right - Client_Rect.left;
+      *Height = Client_Rect.bottom - Client_Rect.top;
+   }
 }
 
 static GET_WINDOW_DIMENSIONS(Get_Window_Dimensions)
@@ -330,7 +339,7 @@ int WinMain(HINSTANCE Instance, HINSTANCE Previous_Instance, LPSTR Command_Line,
          }
 
          float Frame_Seconds_Elapsed = Compute_Win32_Frame_Time(&Win32);
-         if(!Win32.Rendering_Paused)
+         if(Win32.Running && !Win32.Rendering_Paused)
          {
             Render_With_Vulkan(&Win32.VK, Frame_Seconds_Elapsed);
          }
