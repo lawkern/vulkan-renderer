@@ -7,6 +7,7 @@
 #define VK_USE_PLATFORM_XLIB_KHR
 #include <vulkan/vulkan.h>
 
+#include <X11/Xatom.h>
 #include <X11/Xutil.h>
 #include <X11/keysym.h>
 #include <time.h>
@@ -37,6 +38,25 @@ static GET_WINDOW_DIMENSIONS(Get_Window_Dimensions)
 
    *Width  = (int)Window_Attributes.width;
    *Height = (int)Window_Attributes.height;
+}
+
+static void Toggle_Xlib_Fullscreen(xlib_context *Xlib)
+{
+   Atom WM_State = XInternAtom(Xlib->Display, "_NET_WM_STATE", False);
+   Atom WM_Fullscreen = XInternAtom(Xlib->Display, "_NET_WM_STATE_FULLSCREEN", False);
+
+   XEvent Event = {0};
+   Event.type = ClientMessage;
+   Event.xclient.window = Xlib->Window;
+   Event.xclient.message_type = WM_State;
+   Event.xclient.format = 32;
+   Event.xclient.data.l[0] = 2; // NOTE: 0 = remove, 1 = add, 2 = toggle
+   Event.xclient.data.l[1] = WM_Fullscreen;
+   Event.xclient.data.l[2] = 0;
+
+   long Mask = SubstructureRedirectMask|SubstructureNotifyMask;
+   XSendEvent(Xlib->Display, DefaultRootWindow(Xlib->Display), False, Mask, &Event);
+   XFlush(Xlib->Display);
 }
 
 static void Initialize_Xlib(xlib_context *Xlib, int Width, int Height)
@@ -162,14 +182,14 @@ static void Process_Xlib_Events(xlib_context *Xlib)
                case XK_F11: {
                   if(Pressed)
                   {
-                     // Toggle_Xlib_Fullscreen(Xlib);
+                     Toggle_Xlib_Fullscreen(Xlib);
                   }
                } break;
 
                case XK_Return: {
                   if(Pressed && Alt_Pressed)
                   {
-                     // Toggle_Xlib_Fullscreen(Xlib);
+                     Toggle_Xlib_Fullscreen(Xlib);
                   }
                } break;
 
