@@ -471,59 +471,85 @@ static void Create_Vulkan_Buffer(vulkan_context *VK, VkBuffer *Buffer, VkDeviceM
    VkMemoryRequirements Memory_Requirements;
    vkGetBufferMemoryRequirements(VK->Device, *Buffer, &Memory_Requirements);
 
-   VkMemoryAllocateInfo Vertex_Allocate_Info = {0};
-   Vertex_Allocate_Info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-   Vertex_Allocate_Info.allocationSize = Memory_Requirements.size;
-   Vertex_Allocate_Info.memoryTypeIndex = Get_Memory_Type(VK, Memory_Requirements.memoryTypeBits, Properties);
+   VkMemoryAllocateInfo Allocate_Info = {0};
+   Allocate_Info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+   Allocate_Info.allocationSize = Memory_Requirements.size;
+   Allocate_Info.memoryTypeIndex = Get_Memory_Type(VK, Memory_Requirements.memoryTypeBits, Properties);
 
-   VK_CHECK(vkAllocateMemory(VK->Device, &Vertex_Allocate_Info, 0, Buffer_Memory));
+   VK_CHECK(vkAllocateMemory(VK->Device, &Allocate_Info, 0, Buffer_Memory));
    VK_CHECK(vkBindBufferMemory(VK->Device, *Buffer, *Buffer_Memory, 0));
 }
 
-static void Create_Vulkan_Vertex_Buffer(vulkan_context *VK, vertex *Vertices, size Size)
+static vulkan_buffer Create_Vulkan_Vertex_Buffer(vulkan_context *VK, int Accessor_Index)
 {
+   vulkan_buffer Result = {0};
+
+   gltf_accessor Accessor = VK->Scene.Accessors[Accessor_Index];
+   gltf_buffer_view Buffer_View = VK->Scene.Buffer_Views[Accessor.Buffer_View];
+
+   Result.Count = Accessor.Count;
+   Result.Element_Size = Get_GLTF_Type_Size(Accessor.Type, Accessor.Component_Type);
+
+   u8 *Source_Memory = VK->Scene.Binary_Data + Buffer_View.Offset + Accessor.Offset;
+   size Size = Result.Count * Result.Element_Size;
+
    VkBuffer Staging_Buffer;
    VkDeviceMemory Staging_Buffer_Memory;
    VkBufferUsageFlags Staging_Buffer_Usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
    VkMemoryPropertyFlags Staging_Buffer_Properties = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
    Create_Vulkan_Buffer(VK, &Staging_Buffer, &Staging_Buffer_Memory, Size, Staging_Buffer_Usage, Staging_Buffer_Properties);
 
-   void *Data;
-   VK_CHECK(vkMapMemory(VK->Device, Staging_Buffer_Memory, 0, Size, 0, &Data));
-   Copy_Memory(Data, Vertices, Size);
+   void *Device_Memory;
+   VK_CHECK(vkMapMemory(VK->Device, Staging_Buffer_Memory, 0, Size, 0, &Device_Memory));
+   Copy_Memory(Device_Memory, Source_Memory, Size);
    vkUnmapMemory(VK->Device, Staging_Buffer_Memory);
 
    VkBufferUsageFlags Usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT|VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
    VkMemoryPropertyFlags Properties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-   Create_Vulkan_Buffer(VK, &VK->Vertex_Buffer, &VK->Vertex_Buffer_Memory, Size, Usage, Properties);
+   Create_Vulkan_Buffer(VK, &Result.Buffer, &Result.Device_Memory, Size, Usage, Properties);
 
-   Copy_Vulkan_Buffer(VK, VK->Vertex_Buffer, Staging_Buffer, Size);
+   Copy_Vulkan_Buffer(VK, Result.Buffer, Staging_Buffer, Size);
 
    vkDestroyBuffer(VK->Device, Staging_Buffer, 0);
    vkFreeMemory(VK->Device, Staging_Buffer_Memory, 0);
+
+   return(Result);
 }
 
-static void Create_Vulkan_Index_Buffer(vulkan_context *VK, u16 *Indices, size Size)
+static vulkan_buffer Create_Vulkan_Index_Buffer(vulkan_context *VK, int Accessor_Index)
 {
+   vulkan_buffer Result = {0};
+
+   gltf_accessor Accessor = VK->Scene.Accessors[Accessor_Index];
+   gltf_buffer_view Buffer_View = VK->Scene.Buffer_Views[Accessor.Buffer_View];
+
+   Result.Count = Accessor.Count;
+   Result.Element_Size = Get_GLTF_Type_Size(Accessor.Type, Accessor.Component_Type);
+
+   u8 *Source_Memory = VK->Scene.Binary_Data + Buffer_View.Offset + Accessor.Offset;
+   size Size = Result.Count * Result.Element_Size;
+
    VkBuffer Staging_Buffer;
    VkDeviceMemory Staging_Buffer_Memory;
    VkBufferUsageFlags Staging_Buffer_Usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
    VkMemoryPropertyFlags Staging_Buffer_Properties = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
    Create_Vulkan_Buffer(VK, &Staging_Buffer, &Staging_Buffer_Memory, Size, Staging_Buffer_Usage, Staging_Buffer_Properties);
 
-   void *Data;
-   VK_CHECK(vkMapMemory(VK->Device, Staging_Buffer_Memory, 0, Size, 0, &Data));
-   Copy_Memory(Data, Indices, Size);
+   void *Device_Memory;
+   VK_CHECK(vkMapMemory(VK->Device, Staging_Buffer_Memory, 0, Size, 0, &Device_Memory));
+   Copy_Memory(Device_Memory, Source_Memory, Size);
    vkUnmapMemory(VK->Device, Staging_Buffer_Memory);
 
    VkBufferUsageFlags Usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT|VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
    VkMemoryPropertyFlags Properties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-   Create_Vulkan_Buffer(VK, &VK->Index_Buffer, &VK->Index_Buffer_Memory, Size, Usage, Properties);
+   Create_Vulkan_Buffer(VK, &Result.Buffer, &Result.Device_Memory, Size, Usage, Properties);
 
-   Copy_Vulkan_Buffer(VK, VK->Index_Buffer, Staging_Buffer, Size);
+   Copy_Vulkan_Buffer(VK, Result.Buffer, Staging_Buffer, Size);
 
    vkDestroyBuffer(VK->Device, Staging_Buffer, 0);
    vkFreeMemory(VK->Device, Staging_Buffer_Memory, 0);
+
+   return(Result);
 }
 
 static void Copy_Vulkan_Buffer_To_Image(vulkan_context *VK, VkBuffer Buffer, VkImage Image, u32 Width, u32 Height)
@@ -553,11 +579,11 @@ static void Copy_Vulkan_Buffer_To_Image(vulkan_context *VK, VkBuffer Buffer, VkI
    End_Onetime_Vulkan_Commands(VK, Command_Buffer);
 }
 
-static void Create_Vulkan_Texture_Image(vulkan_context *VK)
+static void Create_Vulkan_Texture_Image(vulkan_context *VK, int Width, int Height, u32 *Memory)
 {
    VkBuffer Staging_Buffer;
    VkDeviceMemory Staging_Buffer_Memory;
-   size Size = Texture_Width * Texture_Height * sizeof(*Texture_Memory);
+   size Size = Width * Height * sizeof(*Memory);
 
    VkBufferUsageFlags Staging_Usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
    VkMemoryPropertyFlags Staging_Properties = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
@@ -565,17 +591,17 @@ static void Create_Vulkan_Texture_Image(vulkan_context *VK)
 
    void *Data;
    VK_CHECK(vkMapMemory(VK->Device, Staging_Buffer_Memory, 0, Size, 0, &Data));
-   Copy_Memory(Data, Texture_Memory, Size);
+   Copy_Memory(Data, Memory, Size);
 
    VkFormat Image_Format = VK_FORMAT_R8G8B8A8_SRGB;
    VkImageUsageFlags Image_Usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT|VK_IMAGE_USAGE_SAMPLED_BIT;
    VkMemoryPropertyFlags Image_Properties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
    VkImageTiling Image_Tiling = VK_IMAGE_TILING_OPTIMAL;
-   Create_Vulkan_Image(VK, &VK->Texture_Image, &VK->Texture_Image_Memory, Texture_Width, Texture_Height, VK_SAMPLE_COUNT_1_BIT, Image_Usage, Image_Format, Image_Tiling, Image_Properties);
+   Create_Vulkan_Image(VK, &VK->Texture_Image, &VK->Texture_Image_Memory, Width, Height, VK_SAMPLE_COUNT_1_BIT, Image_Usage, Image_Format, Image_Tiling, Image_Properties);
 
    VkFormat Format = VK_FORMAT_R8G8B8A8_SRGB;
    Transition_Vulkan_Image_Layout(VK, VK->Texture_Image, Format, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-   Copy_Vulkan_Buffer_To_Image(VK, Staging_Buffer, VK->Texture_Image, Texture_Width, Texture_Height);
+   Copy_Vulkan_Buffer_To_Image(VK, Staging_Buffer, VK->Texture_Image, Width, Height);
    Transition_Vulkan_Image_Layout(VK, VK->Texture_Image, Format, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
    vkDestroyBuffer(VK->Device, Staging_Buffer, 0);
@@ -851,29 +877,41 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
    VkPipelineShaderStageCreateInfo Shader_Stage_Infos[] = {Vertex_Stage_Info, Fragment_Stage_Info};
 
    // NOTE: Configure pipeline inputs.
-   VkVertexInputBindingDescription Vertex_Binding_Description = {0};
-   Vertex_Binding_Description.binding = 0;
-   Vertex_Binding_Description.stride = sizeof(*Vertices);
-   Vertex_Binding_Description.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+   gltf_primitive Debug_Primitive = VK->Scene.Meshes[0].Primitives[0];
+
+   gltf_accessor Position_Accessor = VK->Scene.Accessors[Debug_Primitive.Position];
+   gltf_accessor Color_Accessor    = VK->Scene.Accessors[Debug_Primitive.Color_0];
+   gltf_accessor Texcoord_Accessor = VK->Scene.Accessors[Debug_Primitive.Texcoord_0];
+
+   VkVertexInputBindingDescription Vertex_Binding_Descriptions[3] = {0};
+   Vertex_Binding_Descriptions[0].binding = 0;
+   Vertex_Binding_Descriptions[0].stride = Get_GLTF_Type_Size(Position_Accessor.Type, Position_Accessor.Component_Type);
+   Vertex_Binding_Descriptions[0].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+   Vertex_Binding_Descriptions[1].binding = 1;
+   Vertex_Binding_Descriptions[1].stride = Get_GLTF_Type_Size(Color_Accessor.Type, Color_Accessor.Component_Type);
+   Vertex_Binding_Descriptions[1].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+   Vertex_Binding_Descriptions[2].binding = 2;
+   Vertex_Binding_Descriptions[2].stride = Get_GLTF_Type_Size(Texcoord_Accessor.Type, Texcoord_Accessor.Component_Type);
+   Vertex_Binding_Descriptions[2].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 
    VkVertexInputAttributeDescription Vertex_Attribute_Descriptions[3] = {0};
    Vertex_Attribute_Descriptions[0].binding = 0;
    Vertex_Attribute_Descriptions[0].location = 0;
-   Vertex_Attribute_Descriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT;
-   Vertex_Attribute_Descriptions[0].offset = offsetof(vertex, Position);
-   Vertex_Attribute_Descriptions[1].binding = 0;
+   Vertex_Attribute_Descriptions[0].format = GLTF_To_Vulkan_Format(Position_Accessor.Type, Position_Accessor.Component_Type);
+   Vertex_Attribute_Descriptions[0].offset = 0;
+   Vertex_Attribute_Descriptions[1].binding = 1;
    Vertex_Attribute_Descriptions[1].location = 1;
-   Vertex_Attribute_Descriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
-   Vertex_Attribute_Descriptions[1].offset = offsetof(vertex, Color);
-   Vertex_Attribute_Descriptions[2].binding = 0;
+   Vertex_Attribute_Descriptions[1].format = GLTF_To_Vulkan_Format(Color_Accessor.Type, Color_Accessor.Component_Type);
+   Vertex_Attribute_Descriptions[1].offset = 0;
+   Vertex_Attribute_Descriptions[2].binding = 2;
    Vertex_Attribute_Descriptions[2].location = 2;
-   Vertex_Attribute_Descriptions[2].format = VK_FORMAT_R32G32_SFLOAT;
-   Vertex_Attribute_Descriptions[2].offset = offsetof(vertex, Texture_Coordinate);
+   Vertex_Attribute_Descriptions[2].format = GLTF_To_Vulkan_Format(Texcoord_Accessor.Type, Texcoord_Accessor.Component_Type);
+   Vertex_Attribute_Descriptions[2].offset = 0;
 
    VkPipelineVertexInputStateCreateInfo Vertex_Input_Info = {0};
    Vertex_Input_Info.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-   Vertex_Input_Info.vertexBindingDescriptionCount = 1;
-   Vertex_Input_Info.pVertexBindingDescriptions = &Vertex_Binding_Description;
+   Vertex_Input_Info.vertexBindingDescriptionCount = Array_Count(Vertex_Binding_Descriptions);
+   Vertex_Input_Info.pVertexBindingDescriptions = Vertex_Binding_Descriptions;
    Vertex_Input_Info.vertexAttributeDescriptionCount = Array_Count(Vertex_Attribute_Descriptions);
    Vertex_Input_Info.pVertexAttributeDescriptions = Vertex_Attribute_Descriptions;
 
@@ -914,7 +952,7 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
    Rasterizer_Info.polygonMode = VK_POLYGON_MODE_FILL;
    Rasterizer_Info.lineWidth = 1.0f;
    Rasterizer_Info.cullMode = VK_CULL_MODE_BACK_BIT;
-   Rasterizer_Info.frontFace = VK_FRONT_FACE_CLOCKWISE;
+   Rasterizer_Info.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
    Rasterizer_Info.depthBiasEnable = VK_FALSE;
    Rasterizer_Info.depthBiasConstantFactor = 0.0f;
    Rasterizer_Info.depthBiasClamp = 0.0f;
@@ -975,8 +1013,11 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
    }
 
    // NOTE: Create buffers.
-   Create_Vulkan_Vertex_Buffer(VK, Vertices, sizeof(Vertices));
-   Create_Vulkan_Index_Buffer(VK, Indices, sizeof(Indices));
+   VK->Vertex_Positions = Create_Vulkan_Vertex_Buffer(VK, Debug_Primitive.Position);
+   VK->Vertex_Colors    = Create_Vulkan_Vertex_Buffer(VK, Debug_Primitive.Color_0);
+   VK->Vertex_Texcoords = Create_Vulkan_Vertex_Buffer(VK, Debug_Primitive.Texcoord_0);
+
+   VK->Vertex_Indices = Create_Vulkan_Index_Buffer(VK, Debug_Primitive.Indices);
    for(int Frame_Index = 0; Frame_Index < MAX_FRAMES_IN_FLIGHT; ++Frame_Index)
    {
       size Size = sizeof(uniform_buffer_object);
@@ -989,7 +1030,7 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
    }
 
    // NOTE: Create images.
-   Create_Vulkan_Texture_Image(VK);
+   Create_Vulkan_Texture_Image(VK, Debug_Texture_Width, Debug_Texture_Height, Debug_Texture_Memory);
    Create_Vulkan_Depth_Image(VK);
    Create_Vulkan_Color_Image(VK);
 
@@ -1299,10 +1340,11 @@ static RENDER_WITH_VULKAN(Render_With_Vulkan)
       {
          vkCmdBindPipeline(Command_Buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, VK->Graphics_Pipeline);
 
-         VkBuffer Vertex_Buffers[] = {VK->Vertex_Buffer};
-         VkDeviceSize Vertex_Buffer_Offsets[] = {0};
-         vkCmdBindVertexBuffers(Command_Buffer, 0, 1, Vertex_Buffers, Vertex_Buffer_Offsets);
-         vkCmdBindIndexBuffer(Command_Buffer, VK->Index_Buffer, 0, VK_INDEX_TYPE_UINT16);
+         VkBuffer Vertex_Buffers[] = {VK->Vertex_Positions.Buffer, VK->Vertex_Colors.Buffer, VK->Vertex_Texcoords.Buffer};
+         VkDeviceSize Vertex_Buffer_Offsets[] = {0, 0, 0};
+
+         vkCmdBindVertexBuffers(Command_Buffer, 0, Array_Count(Vertex_Buffers), Vertex_Buffers, Vertex_Buffer_Offsets);
+         vkCmdBindIndexBuffer(Command_Buffer, VK->Vertex_Indices.Buffer, 0, VK_INDEX_TYPE_UINT16);
 
          VkViewport Viewport = {0};
          Viewport.x = 0.0f;
@@ -1319,7 +1361,7 @@ static RENDER_WITH_VULKAN(Render_With_Vulkan)
 
          vkCmdBindDescriptorSets(Command_Buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, VK->Pipeline_Layout, 0, 1, &Frame->Descriptor_Set, 0, 0);
 
-         vkCmdDrawIndexed(Command_Buffer, Array_Count(Indices), 1, 0, 0, 0);
+         vkCmdDrawIndexed(Command_Buffer, VK->Vertex_Indices.Count, 1, 0, 0, 0);
       }
       vkCmdEndRenderPass(Command_Buffer);
       VK_CHECK(vkEndCommandBuffer(Command_Buffer));
@@ -1417,11 +1459,15 @@ static DESTROY_VULKAN(Destroy_Vulkan)
       vkDestroyImage(VK->Device, VK->Texture_Image, 0);
       vkFreeMemory(VK->Device, VK->Texture_Image_Memory, 0);
 
-      vkDestroyBuffer(VK->Device, VK->Index_Buffer, 0);
-      vkFreeMemory(VK->Device, VK->Index_Buffer_Memory, 0);
+      vkDestroyBuffer(VK->Device, VK->Vertex_Indices.Buffer, 0);
+      vkDestroyBuffer(VK->Device, VK->Vertex_Texcoords.Buffer, 0);
+      vkDestroyBuffer(VK->Device, VK->Vertex_Colors.Buffer, 0);
+      vkDestroyBuffer(VK->Device, VK->Vertex_Positions.Buffer, 0);
 
-      vkDestroyBuffer(VK->Device, VK->Vertex_Buffer, 0);
-      vkFreeMemory(VK->Device, VK->Vertex_Buffer_Memory, 0);
+      vkFreeMemory(VK->Device, VK->Vertex_Indices.Device_Memory, 0);
+      vkFreeMemory(VK->Device, VK->Vertex_Texcoords.Device_Memory, 0);
+      vkFreeMemory(VK->Device, VK->Vertex_Colors.Device_Memory, 0);
+      vkFreeMemory(VK->Device, VK->Vertex_Positions.Device_Memory, 0);
 
       vkDestroyPipeline(VK->Device, VK->Graphics_Pipeline, 0);
       vkDestroyPipelineLayout(VK->Device, VK->Pipeline_Layout, 0);

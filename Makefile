@@ -1,7 +1,7 @@
 .POSIX:
 CFLAGS = -g3 -std=c99 -DDEBUG -D_DEFAULT_SOURCE $(WARNINGS)
 LDLIBS = -lm
-WARNINGS = -Wall -Wextra\
+WARNINGS = -Wall -Wextra -Werror\
 -Wno-unused-function\
 -Wno-unused-variable\
 -Wno-unused-parameter\

@@ -1,6 +1,6 @@
 /* (c) copyright 2025 Lawrence D. Kern /////////////////////////////////////// */
 
-static vertex Vertices[] =
+static vertex Debug_Vertices[] =
 {
    {{ 1.0f,  1.0f,  1.0f}, {1.0f, 1.0f, 0}, {0.0f, 0.0f}},
    {{ 1.0f, -1.0f,  1.0f}, {0, 1.0f, 1.0f}, {1.0f, 0.0f}},
@@ -23,7 +23,7 @@ static vertex Vertices[] =
    {{-1.0f,  1.0f, -1.0f-3.0f}, {1.0f, 1.0f, 0}, {0.0f, 1.0f}},
 };
 
-static u16 Indices[] =
+static u16 Debug_Indices[] =
 {
    0, 1, 3, 1, 2, 3,
    3, 2, 6, 3, 6, 7,
@@ -41,9 +41,9 @@ static u16 Indices[] =
    4+8, 6+8, 5+8, 4+8, 7+8, 6+8,
 };
 
-static int Texture_Width = 256;
-static int Texture_Height = 256;
-static u32 Texture_Memory[] =
+static int Debug_Texture_Width = 256;
+static int Debug_Texture_Height = 256;
+static u32 Debug_Texture_Memory[] =
 {
    0xff282828,   0xff282828,   0xff282828,   0xff282828,   0xff282828,
    0xff282828,   0xff282828,   0xff282828,   0xff282828,   0xff282828,

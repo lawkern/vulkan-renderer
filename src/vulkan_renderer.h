@@ -42,6 +42,14 @@ typedef struct {
 } vulkan_frame;
 
 typedef struct {
+   VkBuffer Buffer;
+   VkDeviceMemory Device_Memory;
+
+   size Count;
+   size Element_Size;
+} vulkan_buffer;
+
+typedef struct {
    VkInstance Instance;
    VkPhysicalDevice Physical_Device;
    VkSurfaceKHR Surface;
@@ -77,11 +85,10 @@ typedef struct {
    VkDescriptorSetLayout Descriptor_Set_Layout;
    VkDescriptorPool Descriptor_Pool;
 
-   VkBuffer Vertex_Buffer;
-   VkDeviceMemory Vertex_Buffer_Memory;
-
-   VkBuffer Index_Buffer;
-   VkDeviceMemory Index_Buffer_Memory;
+   vulkan_buffer Vertex_Positions;
+   vulkan_buffer Vertex_Colors;
+   vulkan_buffer Vertex_Texcoords;
+   vulkan_buffer Vertex_Indices;
 
    VkImage Texture_Image;
    VkDeviceMemory Texture_Image_Memory;

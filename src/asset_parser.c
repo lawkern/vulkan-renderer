@@ -5,12 +5,16 @@
 // checking is for our own sanity.
 
 // NOTE: Basic JSON parsing API.
-static string Find_Json_Array(string Json, string Key);
-static string Find_Json_Object(string Json, string Key);
+static string Find_Json_Array_By_Key(string Json, string Key);
 static int Json_Array_Count(string Array);
+
+static string Find_Json_Object_By_Key(string Json, string Key);
 static string Next_Json_Object(string Json);
-static int Find_Json_Integer(string Json, string Key);
-static string Find_Json_String(string Json, string Key);
+
+static int Find_Json_Integer_By_Key(string Json, string Key);
+static string Find_Json_String_By_Key(string Json, string Key);
+
+#define JSON_KEY(Literal) S("\"" Literal "\"")
 
 // NOTE: GLB file parsing.
 static void Parse_GLB(gltf_scene *Result, arena *Arena, arena Scratch, char *Path)
@@ -54,10 +58,8 @@ static void Parse_GLB(gltf_scene *Result, arena *Arena, arena Scratch, char *Pat
 
    At += Result->Binary_Size;
 
-#  define KEY(Literal) S("\"" Literal "\"")
-
    // NOTE: Parse accessors.
-   string Json_Accessors = Find_Json_Array(Json, KEY("accessors"));
+   string Json_Accessors = Find_Json_Array_By_Key(Json, JSON_KEY("accessors"));
    if(Json_Accessors.Length)
    {
       Result->Accessor_Count = Json_Array_Count(Json_Accessors);
@@ -67,15 +69,15 @@ static void Parse_GLB(gltf_scene *Result, arena *Arena, arena Scratch, char *Pat
       {
          gltf_accessor *Accessor = Result->Accessors + Accessor_Index;
 
-         Accessor->Buffer_View    = Find_Json_Integer(Json_Accessors, KEY("bufferView"));
-         Accessor->Offset         = Find_Json_Integer(Json_Accessors, KEY("byteOffset"));
-         Accessor->Count          = Find_Json_Integer(Json_Accessors, KEY("count"));
-         Accessor->Component_Type = Find_Json_Integer(Json_Accessors, KEY("componentType"));
+         Accessor->Buffer_View    = Find_Json_Integer_By_Key(Json_Accessors, JSON_KEY("bufferView"));
+         Accessor->Offset         = Find_Json_Integer_By_Key(Json_Accessors, JSON_KEY("byteOffset"));
+         Accessor->Count          = Find_Json_Integer_By_Key(Json_Accessors, JSON_KEY("count"));
+         Accessor->Component_Type = Find_Json_Integer_By_Key(Json_Accessors, JSON_KEY("componentType"));
 
-         string Name = Find_Json_String(Json_Accessors, KEY("type"));
+         string Name = Find_Json_String_By_Key(Json_Accessors, JSON_KEY("type"));
          for(int Type = 0; Type < GLTF_ACCESSOR_TYPE_COUNT; ++Type)
          {
-            if(Strings_Are_Equal(Name, GLTF_Accessor_Type_Names[Type]))
+            if(Strings_Are_Equal(Name, GLTF_Accessor_Type_Infos[Type].Name))
             {
                Accessor->Type = Type;
                break;
@@ -87,7 +89,7 @@ static void Parse_GLB(gltf_scene *Result, arena *Arena, arena Scratch, char *Pat
    }
 
    // NOTE: Parse buffer views.
-   string Json_Buffer_Views = Find_Json_Array(Json, KEY("bufferViews"));
+   string Json_Buffer_Views = Find_Json_Array_By_Key(Json, JSON_KEY("bufferViews"));
    if(Json_Buffer_Views.Length)
    {
       Result->Buffer_View_Count = Json_Array_Count(Json_Buffer_Views);
@@ -96,17 +98,17 @@ static void Parse_GLB(gltf_scene *Result, arena *Arena, arena Scratch, char *Pat
       for(int Buffer_View_Index = 0; Buffer_View_Index < Result->Buffer_View_Count; ++Buffer_View_Index)
       {
          gltf_buffer_view *Buffer_View = Result->Buffer_Views + Buffer_View_Index;
-         Buffer_View->Buffer = Find_Json_Integer(Json_Buffer_Views, KEY("buffer"));
-         Buffer_View->Offset = Find_Json_Integer(Json_Buffer_Views, KEY("byteOffset"));
-         Buffer_View->Length = Find_Json_Integer(Json_Buffer_Views, KEY("byteLength"));
-         Buffer_View->Stride = Find_Json_Integer(Json_Buffer_Views, KEY("byteStride"));
+         Buffer_View->Buffer = Find_Json_Integer_By_Key(Json_Buffer_Views, JSON_KEY("buffer"));
+         Buffer_View->Offset = Find_Json_Integer_By_Key(Json_Buffer_Views, JSON_KEY("byteOffset"));
+         Buffer_View->Length = Find_Json_Integer_By_Key(Json_Buffer_Views, JSON_KEY("byteLength"));
+         Buffer_View->Stride = Find_Json_Integer_By_Key(Json_Buffer_Views, JSON_KEY("byteStride"));
 
          Json_Buffer_Views = Next_Json_Object(Json_Buffer_Views);
       }
    }
 
    // NOTE: Parse buffers.
-   string Json_Buffers = Find_Json_Array(Json, KEY("buffers"));
+   string Json_Buffers = Find_Json_Array_By_Key(Json, JSON_KEY("buffers"));
    if(Json_Buffers.Length)
    {
       Result->Buffer_Count = Json_Array_Count(Json_Buffers);
@@ -115,14 +117,14 @@ static void Parse_GLB(gltf_scene *Result, arena *Arena, arena Scratch, char *Pat
       for(int Buffer_Index = 0; Buffer_Index < Result->Buffer_Count; ++Buffer_Index)
       {
          gltf_buffer *Buffer = Result->Buffers + Buffer_Index;
-         Buffer->Length = Find_Json_Integer(Json_Buffers, KEY("byteLength"));
+         Buffer->Length = Find_Json_Integer_By_Key(Json_Buffers, JSON_KEY("byteLength"));
 
          Json_Buffers = Next_Json_Object(Json_Buffers);
       }
    }
 
    // NOTE: Parse meshes.
-   string Json_Meshes = Find_Json_Array(Json, KEY("meshes"));
+   string Json_Meshes = Find_Json_Array_By_Key(Json, JSON_KEY("meshes"));
    if(Json_Meshes.Length)
    {
       Result->Mesh_Count = Json_Array_Count(Json_Meshes);
@@ -132,7 +134,7 @@ static void Parse_GLB(gltf_scene *Result, arena *Arena, arena Scratch, char *Pat
       {
          gltf_mesh *Mesh = Result->Meshes + Mesh_Index;
 
-         string Json_Primitives = Find_Json_Array(Json_Meshes, KEY("primitives"));
+         string Json_Primitives = Find_Json_Array_By_Key(Json_Meshes, JSON_KEY("primitives"));
          if(Json_Primitives.Length)
          {
             Mesh->Primitive_Count = Json_Array_Count(Json_Primitives);
@@ -141,17 +143,17 @@ static void Parse_GLB(gltf_scene *Result, arena *Arena, arena Scratch, char *Pat
             for(int Primitive_Index = 0; Primitive_Index < Mesh->Primitive_Count; ++Primitive_Index)
             {
                gltf_primitive *Primitive = Mesh->Primitives + Primitive_Index;
-               Primitive->Indices = Find_Json_Integer(Json_Primitives, KEY("indices"));
+               Primitive->Indices = Find_Json_Integer_By_Key(Json_Primitives, JSON_KEY("indices"));
 
-               string Json_Attributes = Find_Json_Object(Json_Primitives, KEY("attributes"));
+               string Json_Attributes = Find_Json_Object_By_Key(Json_Primitives, JSON_KEY("attributes"));
                if(Json_Attributes.Length)
                {
-                  Primitive->Position   = Find_Json_Integer(Json_Attributes, KEY("POSITION"));
-                  Primitive->Normal     = Find_Json_Integer(Json_Attributes, KEY("NORMAL"));
-                  Primitive->Texcoord_0 = Find_Json_Integer(Json_Attributes, KEY("TEXCOORD_0"));
-                  Primitive->Texcoord_1 = Find_Json_Integer(Json_Attributes, KEY("TEXCOORD_1"));
-                  Primitive->Color_0    = Find_Json_Integer(Json_Attributes, KEY("COLOR_0"));
-                  Primitive->Color_1    = Find_Json_Integer(Json_Attributes, KEY("COLOR_1"));
+                  Primitive->Position   = Find_Json_Integer_By_Key(Json_Attributes, JSON_KEY("POSITION"));
+                  Primitive->Normal     = Find_Json_Integer_By_Key(Json_Attributes, JSON_KEY("NORMAL"));
+                  Primitive->Texcoord_0 = Find_Json_Integer_By_Key(Json_Attributes, JSON_KEY("TEXCOORD_0"));
+                  Primitive->Texcoord_1 = Find_Json_Integer_By_Key(Json_Attributes, JSON_KEY("TEXCOORD_1"));
+                  Primitive->Color_0    = Find_Json_Integer_By_Key(Json_Attributes, JSON_KEY("COLOR_0"));
+                  Primitive->Color_1    = Find_Json_Integer_By_Key(Json_Attributes, JSON_KEY("COLOR_1"));
                }
 
                Json_Primitives = Next_Json_Object(Json_Primitives);
@@ -160,16 +162,14 @@ static void Parse_GLB(gltf_scene *Result, arena *Arena, arena Scratch, char *Pat
       }
    }
 
-#  undef KEY
-
    Free_Entire_File(File.Data, File.Length);
 }
 
-// NOTE: The basic JSON parsing implementation. This is the bare minimum parsing
-// we need to pull data from a trusted GLB file. It prioritizes simplicity, does
-// not handle basic edge cases of JSON, and is not particularly fast. At some
-// point we'll probably move it to a build step to pack GLB assets into our own
-// binary format.
+// NOTE: Below is a basic JSON parsing implementation. This is the bare minimum
+// parsing we need to pull data from a trusted GLB file. It prioritizes
+// simplicity, does not handle basic edge cases of JSON, and is not particularly
+// fast. At some point we'll probably move it to a build step to pack GLB assets
+// into our own binary format.
 
 static string Find_Json_By_Key(string Json, string Key)
 {
@@ -194,7 +194,7 @@ static string Find_Json_By_Key(string Json, string Key)
    return(Result);
 }
 
-static string Find_Json_Array(string Json, string Key)
+static string Find_Json_Array_By_Key(string Json, string Key)
 {
    // NOTE: Return a string containing the contents of a JSON array with the
    // specified key. The result does not include the enclosing brackets.
@@ -239,7 +239,7 @@ static string Find_Json_Array(string Json, string Key)
    return(Result);
 }
 
-static string Find_Json_Object(string Json, string Key)
+static string Find_Json_Object_By_Key(string Json, string Key)
 {
    // NOTE: Return a string containing the contents of a JSON object with the
    // specified key. The result does not include the enclosing braces.
@@ -373,7 +373,7 @@ static string Next_Json_Object(string Json)
    return(Result);
 }
 
-static int Find_Json_Integer(string Json, string Key)
+static int Find_Json_Integer_By_Key(string Json, string Key)
 {
    int Result = 0;
 
@@ -398,7 +398,7 @@ static int Find_Json_Integer(string Json, string Key)
    return(Result);
 }
 
-static string Find_Json_String(string Json, string Key)
+static string Find_Json_String_By_Key(string Json, string Key)
 {
    string Result = {0};
 
