@@ -30,24 +30,23 @@ typedef struct {
 } uniform_buffer_object;
 
 typedef struct {
+   VkBuffer Buffer;
+   VkDeviceMemory Device_Memory;
+   void *Mapped_Memory_Address;
+
+   size Size;
+   VkIndexType Index_Type;
+} vulkan_buffer;
+
+typedef struct {
    VkSemaphore Image_Available_Semaphore;
    VkFence In_Flight_Fence;
 
    VkDescriptorSet Descriptor_Set;
    VkCommandBuffer Command_Buffer;
 
-   VkBuffer Uniform_Buffer;
-   VkDeviceMemory Uniform_Buffer_Memory;
-   void *Mapped_Uniform_Buffer;
+   vulkan_buffer Uniform;
 } vulkan_frame;
-
-typedef struct {
-   VkBuffer Buffer;
-   VkDeviceMemory Device_Memory;
-
-   size Count;
-   size Element_Size;
-} vulkan_buffer;
 
 typedef struct {
    VkInstance Instance;
@@ -86,6 +85,7 @@ typedef struct {
    VkDescriptorPool Descriptor_Pool;
 
    vulkan_buffer Vertex_Positions;
+   vulkan_buffer Vertex_Normals;
    vulkan_buffer Vertex_Colors;
    vulkan_buffer Vertex_Texcoords;
    vulkan_buffer Vertex_Indices;

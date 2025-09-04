@@ -193,3 +193,16 @@ GLTF_To_Vulkan_Format(gltf_accessor_type Type, gltf_component_type Component_Typ
 
    return(Result);
 }
+
+static inline VkIndexType GLTF_To_Vulkan_Index(gltf_component_type Component_Type)
+{
+   VkIndexType Result;
+   switch(Component_Type)
+   {
+      case GLTF_ACCESSOR_COMPONENT_U8:  { Result = VK_INDEX_TYPE_UINT8_EXT; } break;
+      case GLTF_ACCESSOR_COMPONENT_U16: { Result = VK_INDEX_TYPE_UINT16;    } break;
+      case GLTF_ACCESSOR_COMPONENT_U32: { Result = VK_INDEX_TYPE_UINT32;    } break;
+      default:                          { Result = VK_INDEX_TYPE_UINT16;    } break;
+   }
+   return(Result);
+}
