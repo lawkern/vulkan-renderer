@@ -43,12 +43,20 @@ typedef struct {
 } vulkan_frame;
 
 typedef struct {
+   VkShaderModule Vertex_Shader;
+   VkShaderModule Fragment_Shader;
+
+   VkPipelineLayout Layout;
+   VkPipeline Pipeline;
+} vulkan_pipeline;
+
+typedef struct {
    VkInstance Instance;
    VkPhysicalDevice Physical_Device;
    VkSurfaceKHR Surface;
 
    VkDevice Device;
-   VkPhysicalDeviceFeatures Physical_Device_Enabled_Features;
+   VkPhysicalDeviceFeatures Enabled_Physical_Device_Features;
    VkPhysicalDeviceProperties Physical_Device_Properties;
 
    void *Platform_Context;
@@ -69,12 +77,8 @@ typedef struct {
 
    VkSampleCountFlagBits Multisample_Count;
 
-   VkShaderModule Vertex_Shader;
-   VkShaderModule Fragment_Shader;
-
-   VkRenderPass Render_Pass;
-   VkPipelineLayout Pipeline_Layout;
-   VkPipeline Graphics_Pipeline;
+   VkRenderPass Basic_Render_Pass;
+   vulkan_pipeline Basic_Graphics_Pipeline;
 
    VkDescriptorSetLayout Descriptor_Set_Layout;
    VkDescriptorPool Descriptor_Pool;

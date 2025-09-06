@@ -12,8 +12,8 @@ WARNINGS = -Wall -Wextra -Werror\
 WL_PROTOCOLS  = $$(pkg-config wayland-protocols --variable=pkgdatadir)
 WL_CLIENT     = $$(pkg-config wayland-client --cflags --libs)
 
-# compile: shaders wayland
-compile: shaders xlib
+compile: shaders wayland
+# compile: shaders xlib
 # compile: shaders win32
 
 shaders:
