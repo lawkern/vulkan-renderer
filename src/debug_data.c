@@ -1,46 +1,5 @@
 /* (c) copyright 2025 Lawrence D. Kern /////////////////////////////////////// */
 
-static vertex Debug_Vertices[] =
-{
-   {{ 1.0f,  1.0f,  1.0f}, {1.0f, 1.0f, 0}, {0.0f, 0.0f}},
-   {{ 1.0f, -1.0f,  1.0f}, {0, 1.0f, 1.0f}, {1.0f, 0.0f}},
-   {{-1.0f, -1.0f,  1.0f}, {1.0f, 0, 1.0f}, {1.0f, 1.0f}},
-   {{-1.0f,  1.0f,  1.0f}, {1.0f, 1.0f, 0}, {0.0f, 1.0f}},
-
-   {{ 1.0f,  1.0f, -1.0f}, {1.0f, 1.0f, 0}, {0.0f, 0.0f}},
-   {{ 1.0f, -1.0f, -1.0f}, {0, 1.0f, 1.0f}, {1.0f, 0.0f}},
-   {{-1.0f, -1.0f, -1.0f}, {1.0f, 0, 1.0f}, {1.0f, 1.0f}},
-   {{-1.0f,  1.0f, -1.0f}, {1.0f, 1.0f, 0}, {0.0f, 1.0f}},
-
-   {{ 1.0f,  1.0f,  1.0f-3.0f}, {1.0f, 1.0f, 0}, {0.0f, 0.0f}},
-   {{ 1.0f, -1.0f,  1.0f-3.0f}, {0, 1.0f, 1.0f}, {1.0f, 0.0f}},
-   {{-1.0f, -1.0f,  1.0f-3.0f}, {1.0f, 0, 1.0f}, {1.0f, 1.0f}},
-   {{-1.0f,  1.0f,  1.0f-3.0f}, {1.0f, 1.0f, 0}, {0.0f, 1.0f}},
-
-   {{ 1.0f,  1.0f, -1.0f-3.0f}, {1.0f, 1.0f, 0}, {0.0f, 0.0f}},
-   {{ 1.0f, -1.0f, -1.0f-3.0f}, {0, 1.0f, 1.0f}, {1.0f, 0.0f}},
-   {{-1.0f, -1.0f, -1.0f-3.0f}, {1.0f, 0, 1.0f}, {1.0f, 1.0f}},
-   {{-1.0f,  1.0f, -1.0f-3.0f}, {1.0f, 1.0f, 0}, {0.0f, 1.0f}},
-};
-
-static u16 Debug_Indices[] =
-{
-   0, 1, 3, 1, 2, 3,
-   3, 2, 6, 3, 6, 7,
-   2, 1, 5, 2, 5, 6,
-   1, 0, 4, 1, 4, 5,
-   0, 7, 4, 0, 3, 7,
-   4, 6, 5, 4, 7, 6,
-
-
-   0+8, 1+8, 3+8, 1+8, 2+8, 3+8,
-   3+8, 2+8, 6+8, 3+8, 6+8, 7+8,
-   2+8, 1+8, 5+8, 2+8, 5+8, 6+8,
-   1+8, 0+8, 4+8, 1+8, 4+8, 5+8,
-   0+8, 7+8, 4+8, 0+8, 3+8, 7+8,
-   4+8, 6+8, 5+8, 4+8, 7+8, 6+8,
-};
-
 static int Debug_Texture_Width = 256;
 static int Debug_Texture_Height = 256;
 static u32 Debug_Texture_Memory[] =
@@ -13936,3 +13895,46 @@ static u8 *Glyphs[128] =
    ['}'] = Glyph_Memory_125,
    ['~'] = Glyph_Memory_126,
 };
+
+static char *Debug_Message_Lines[] =
+{
+   // TODO: Update the top-level message when we start using a newer version of
+   // Vulkan. We also want to accept more useful messages from Vulkan about what
+   // went wrong.
+
+   "Hey there! This program requires Vulkan 1.0.",
+   "Make sure you have the right drivers installed.",
+};
+
+static inline void Display_Simple_Debug_Message(u32 *Pixels, int Width, int Height)
+{
+   // NOTE: Clear the screen and print out a tiny debug message.
+   int Count = Width * Height;
+   for(int Index = 0; Index < Count; ++Index)
+   {
+      Pixels[Index] = 0xFF0000FF;
+   }
+   for(int Line_Index = 0; Line_Index < Array_Count(Debug_Message_Lines); ++Line_Index)
+   {
+      char *Message = Debug_Message_Lines[Line_Index];
+      int Y_Offset = Line_Index * Glyph_Height;
+
+      for(char *Character = Message; *Character; ++Character)
+      {
+         int Index = *Character;
+         int X_Offset = (Character - Message) * Glyph_Width;
+
+         for(int Y = 0; Y < Glyph_Height; ++Y)
+         {
+            for(int X = 0; X < Glyph_Width; ++X)
+            {
+               u8 Source = Glyphs[Index][Y*Glyph_Width + X];
+               if(Source)
+               {
+                  Pixels[(Y + Y_Offset)*Width + X + X_Offset] = 0xFFFFFFFF;
+               }
+            }
+         }
+      }
+   }
+}

@@ -326,44 +326,7 @@ static void Create_Wayland_Frame_Callback(wayland_context *Wayland)
 #endif
    u32 *Pixels = Wayland->Buffer_Pixels + Width*Height*Wayland->Buffer_Index;
 
-   // TODO: Update the top-level message when we start using a newer version of
-   // Vulkan. We also want to accept more useful messages from Vulkan about what
-   // went wrong.
-   char *Message_Lines[] =
-   {
-      "Hey there! This program requires Vulkan 1.0.",
-      "Make sure you have the right drivers installed.",
-   };
-
-   // NOTE: Clear the screen and print out a tiny debug message.
-   int Count = Width * Height;
-   for(int Index = 0; Index < Count; ++Index)
-   {
-      Pixels[Index] = 0xFF0000FF;
-   }
-   for(int Line_Index = 0; Line_Index < Array_Count(Message_Lines); ++Line_Index)
-   {
-      char *Message = Message_Lines[Line_Index];
-      int Y_Offset = Line_Index * Glyph_Height;
-
-      for(char *Character = Message; *Character; ++Character)
-      {
-         int Index = *Character;
-         int X_Offset = (Character - Message) * Glyph_Width;
-
-         for(int Y = 0; Y < Glyph_Height; ++Y)
-         {
-            for(int X = 0; X < Glyph_Width; ++X)
-            {
-               u8 Source = Glyphs[Index][Y*Glyph_Width + X];
-               if(Source)
-               {
-                  Pixels[(Y + Y_Offset)*Width + X + X_Offset] = 0xFFFFFFFF;
-               }
-            }
-         }
-      }
-   }
+   Display_Simple_Debug_Message(Pixels, Width, Height);
 
    wl_surface_attach(Wayland->Surface, Wayland->Buffers[Wayland->Buffer_Index], 0, 0);
    wl_surface_damage(Wayland->Surface, 0, 0, Width, Height);

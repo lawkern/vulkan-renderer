@@ -18,12 +18,6 @@
 #endif
 
 typedef struct {
-   vec3 Position;
-   vec3 Color;
-   vec2 Texture_Coordinate;
-} vertex;
-
-typedef struct {
    mat4 Model;
    mat4 View;
    mat4 Projection;
@@ -60,7 +54,8 @@ typedef struct {
    void *Platform_Context;
    arena Arena;
    arena Scratch;
-   gltf_scene Scene;
+
+   gltf_scene Debug_Scene;
 
    VkSwapchainKHR Swapchain;
    VkExtent2D Swapchain_Extent;
@@ -119,7 +114,7 @@ typedef struct {
    bool Resize_Requested;
 } vulkan_context;
 
-#define VK_CHECK(Result)                                                \
+#define VC(Result)                                                      \
    do {                                                                 \
       VkResult Err = (Result);                                          \
       if(Err != VK_SUCCESS)                                             \
@@ -128,7 +123,6 @@ typedef struct {
          Invalid_Code_Path;                                             \
       }                                                                 \
    } while(0)
-
 
 // NOTE: Renderer API for use by each platform:
 

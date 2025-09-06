@@ -33,6 +33,8 @@ typedef ptrdiff_t size;
 #include <stdlib.h>
 #include <string.h>
 
+#include "debug_data.c"
+
 static inline void Copy_Memory(void *Destination, void *Source, size Size)
 {
    memcpy(Destination, Source, Size);
@@ -50,20 +52,31 @@ typedef struct {
    size Used;
 } arena;
 
-static inline arena Make_Arena(size Size)
+static inline void Make_Arena(arena *Arena, size Size)
 {
-   arena Result = {0};
-   Result.Base = calloc(1, Size);
-   Result.Size = Size;
+   Arena->Base = calloc(1, Size);
+   Arena->Size = Size;
+   Arena->Used = 0;
 
-   Assert(Result.Base);
-
-   return(Result);
+   Assert(Arena->Base);
 }
 
 static inline void Reset_Arena(arena *Arena)
 {
    Arena->Used = 0;
+}
+
+static inline void Make_Arena_Once(arena *Arena, size Size)
+{
+   // NOTE: Assumes new arenas were previously zero-initialized.
+   if(Arena->Size == 0)
+   {
+      Make_Arena(Arena, Size);
+   }
+   else
+   {
+      Reset_Arena(Arena);
+   }
 }
 
 // TODO: Alignment!

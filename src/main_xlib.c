@@ -20,6 +20,9 @@ typedef struct {
    Display *Display;
    Window Window;
 
+   u32 *Image_Pixels;
+   XImage *Image;
+
    vulkan_context VK;
    bool Running;
 } xlib_context;
@@ -111,6 +114,11 @@ static void Initialize_Xlib(xlib_context *Xlib, int Width, int Height)
 
       XMapWindow(Xlib->Display, Xlib->Window);
       XFlush(Xlib->Display);
+
+      // NOTE: Set up a fallback image to draw into if we fail to initialize
+      // Vulkan.
+      Xlib->Image_Pixels = mmap(0, Width*Height*sizeof(*Xlib->Image_Pixels), PROT_READ|PROT_WRITE, MAP_ANONYMOUS|MAP_PRIVATE, -1, 0);
+      Xlib->Image = XCreateImage(Xlib->Display, Visual, Depth, ZPixmap, 0, (char *)Xlib->Image_Pixels, Width, Height, 32, 0);
 
       Xlib->Running = true;
    }
@@ -207,6 +215,17 @@ static void Process_Xlib_Events(xlib_context *Xlib)
    }
 }
 
+static void Render_With_Xlib(xlib_context *Xlib)
+{
+   int Width = DEFAULT_RESOLUTION_WIDTH;
+   int Height = DEFAULT_RESOLUTION_HEIGHT;
+
+   Display_Simple_Debug_Message(Xlib->Image_Pixels, Width, Height);
+
+   GC Graphics_Context = DefaultGC(Xlib->Display, DefaultScreen(Xlib->Display));
+   XPutImage(Xlib->Display, Xlib->Window, Graphics_Context, Xlib->Image, 0, 0, 0, 0, Width, Height);
+}
+
 int main(void)
 {
    xlib_context Xlib = {0};
@@ -231,6 +250,16 @@ int main(void)
       }
 
       Destroy_Vulkan(&Xlib.VK);
+   }
+   else
+   {
+      // NOTE: This is our fallback path to display a simple error message in
+      // the case we fail to initialize Vulkan.
+      while(Xlib.Running)
+      {
+         Process_Xlib_Events(&Xlib);
+         Render_With_Xlib(&Xlib);
+      }
    }
 
    XCloseDisplay(Xlib.Display);
