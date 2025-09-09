@@ -33,6 +33,13 @@ typedef struct {
 } vulkan_buffer;
 
 typedef struct {
+   VkImage Image;
+   VkDeviceMemory Device_Memory;
+   VkImageView View;
+   VkFormat Format;
+} vulkan_image;
+
+typedef struct {
    VkSemaphore Image_Available_Semaphore;
    VkFence In_Flight_Fence;
 
@@ -43,12 +50,28 @@ typedef struct {
 } vulkan_frame;
 
 typedef struct {
+   VkPipeline Pipeline;
+   VkPipelineLayout Layout;
+
    VkShaderModule Vertex_Shader;
    VkShaderModule Fragment_Shader;
-
-   VkPipelineLayout Layout;
-   VkPipeline Pipeline;
 } vulkan_pipeline;
+
+typedef struct {
+   VkSwapchainKHR Handle;
+   VkExtent2D Extent;
+   VkFormat Image_Format;
+
+   vulkan_image Depth_Image;
+   vulkan_image Color_Image;
+
+   u32 Image_Count;
+   u32 Max_Image_Count;
+   VkImage *Images;
+   VkImageView *Image_Views;
+   VkFramebuffer *Framebuffers;
+   VkSemaphore *Render_Finished_Semaphores;
+} vulkan_swapchain;
 
 typedef struct {
    VkInstance Instance;
@@ -65,20 +88,13 @@ typedef struct {
 
    gltf_scene Debug_Scene;
 
-   VkSwapchainKHR Swapchain;
-   VkExtent2D Swapchain_Extent;
-   VkFormat Swapchain_Image_Format;
-
-   u32 Swapchain_Image_Count;
-   VkImage *Swapchain_Images;
-   VkImageView *Swapchain_Image_Views;
-   VkFramebuffer *Swapchain_Framebuffers;
-   VkSemaphore *Render_Finished_Semaphores;
+   vulkan_swapchain Swapchain;
 
    VkSampleCountFlagBits Multisample_Count;
 
    VkRenderPass Basic_Render_Pass;
    vulkan_pipeline Basic_Graphics_Pipeline;
+   // vulkan_pipeline Basic_Text_Pipeline;
 
    VkDescriptorSetLayout Descriptor_Set_Layout;
    VkDescriptorPool Descriptor_Pool;
@@ -89,19 +105,9 @@ typedef struct {
    vulkan_buffer Vertex_Texcoords;
    vulkan_buffer Vertex_Indices;
 
-   VkImage Texture_Image;
-   VkDeviceMemory Texture_Image_Memory;
-   VkImageView Texture_Image_View;
    VkSampler Texture_Sampler;
-
-   VkImage Depth_Image;
-   VkFormat Depth_Image_Format;
-   VkDeviceMemory Depth_Image_Memory;
-   VkImageView Depth_Image_View;
-
-   VkImage Color_Image;
-   VkDeviceMemory Color_Image_Memory;
-   VkImageView Color_Image_View;
+   vulkan_image Debug_Texture;
+   vulkan_image Debug_Text;
 
    VkCommandPool Command_Pool;
    vulkan_frame Frames[MAX_FRAMES_IN_FLIGHT];
