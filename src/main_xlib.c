@@ -186,6 +186,11 @@ static void Process_Xlib_Events(xlib_context *Xlib)
 
             switch(Key)
             {
+               case XK_r: {
+                  Destroy_Vulkan(&Xlib->VK);
+                  Initialize_Vulkan(&Xlib->VK, Xlib);
+               } break;
+
                case XK_f:
                case XK_F11: {
                   if(Pressed)

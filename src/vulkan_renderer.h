@@ -21,7 +21,7 @@ typedef struct {
    mat4 Model;
    mat4 View;
    mat4 Projection;
-} uniform_buffer_object;
+} basic_uniform;
 
 typedef struct {
    VkBuffer Buffer;
@@ -74,16 +74,19 @@ typedef struct {
 } vulkan_swapchain;
 
 typedef struct {
-   VkInstance Instance;
-   VkPhysicalDevice Physical_Device;
-   VkSurfaceKHR Surface;
+   VkPhysicalDevice Handle;
+   VkPhysicalDeviceFeatures Enabled_Features;
+   VkPhysicalDeviceProperties Properties;
+} vulkan_physical_device;
 
+typedef struct {
+   VkInstance Instance;
+   vulkan_physical_device Physical_Device;
+   VkSurfaceKHR Surface;
    VkDevice Device;
-   VkPhysicalDeviceFeatures Enabled_Physical_Device_Features;
-   VkPhysicalDeviceProperties Physical_Device_Properties;
 
    void *Platform_Context;
-   arena Arena;
+   arena Permanent;
    arena Scratch;
 
    gltf_scene Debug_Scene;

@@ -251,6 +251,14 @@ static void Key_Keyboard(void *Data, struct wl_keyboard *Keyboard, u32 Serial, u
 
    switch(Key)
    {
+      case KEY_R: {
+         if(Pressed)
+         {
+            Destroy_Vulkan(&Wayland->VK);
+            Initialize_Vulkan(&Wayland->VK, Wayland);
+         }
+      } break;
+
       case KEY_F:
       case KEY_F11: {
          if(Pressed)

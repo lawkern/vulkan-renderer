@@ -55,6 +55,278 @@ static bool Vulkan_Device_Extensions_Supported(VkPhysicalDevice Physical_Device,
    return(Result);
 }
 
+static bool Create_Vulkan_Instance(VkInstance *Instance, arena Scratch)
+{
+   bool Result = false;
+
+   VkApplicationInfo Application_Info = {0};
+   Application_Info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+   Application_Info.pApplicationName = "Vulkan Renderer";
+   Application_Info.applicationVersion = 1;
+   Application_Info.apiVersion = VK_API_VERSION_1_0;
+
+   const char *Instance_Extension_Names[] =
+   {
+      VK_KHR_SURFACE_EXTENSION_NAME,
+      PLATFORM_SURFACE_EXTENSION_NAME,
+#if DEBUG
+      VK_EXT_DEBUG_UTILS_EXTENSION_NAME,
+#endif
+   };
+
+   if(Vulkan_Instance_Extensions_Supported(Instance_Extension_Names, Array_Count(Instance_Extension_Names), Scratch))
+   {
+      VkInstanceCreateInfo Instance_Info = {0};
+      Instance_Info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+      Instance_Info.pApplicationInfo = &Application_Info;
+      Instance_Info.enabledExtensionCount = Array_Count(Instance_Extension_Names);
+      Instance_Info.ppEnabledExtensionNames = Instance_Extension_Names;
+#if DEBUG
+      const char *Required_Layer_Names[] = {"VK_LAYER_KHRONOS_validation"};
+      Instance_Info.enabledLayerCount = Array_Count(Required_Layer_Names);
+      Instance_Info.ppEnabledLayerNames = Required_Layer_Names;
+#endif
+
+      VkResult Return_Code = vkCreateInstance(&Instance_Info, 0, Instance);
+      Result = (Return_Code == VK_SUCCESS);
+   }
+
+   return(Result);
+}
+
+static bool Choose_Vulkan_Physical_Device(vulkan_physical_device *Physical_Device, VkInstance Instance, arena Scratch)
+{
+   Zero_Struct(Physical_Device);
+
+   // NOTE: Enumerate the available physical devices.
+   u32 Physical_Count = 0;
+   VC(vkEnumeratePhysicalDevices(Instance, &Physical_Count, 0));
+   Assert(Physical_Count > 0);
+
+   VkPhysicalDevice *Physical_Devices = Allocate(&Scratch, VkPhysicalDevice, Physical_Count);
+   VC(vkEnumeratePhysicalDevices(Instance, &Physical_Count, Physical_Devices));
+
+   // NOTE: For now, any features enabled in this struct need to be kept in sync
+   // with the physical device check below.
+   Physical_Device->Enabled_Features.samplerAnisotropy = VK_TRUE;
+
+   // NOTE: Choose a physical device.
+   Physical_Device->Handle = VK_NULL_HANDLE;
+   for(u32 Physical_Index = 0; Physical_Index < Physical_Count; ++Physical_Index)
+   {
+      VkPhysicalDevice Handle = Physical_Devices[Physical_Index];
+
+      VkPhysicalDeviceProperties Properties;
+      vkGetPhysicalDeviceProperties(Handle, &Properties);
+
+      VkPhysicalDeviceFeatures Features;
+      vkGetPhysicalDeviceFeatures(Handle, &Features);
+
+      if(Features.samplerAnisotropy == Physical_Device->Enabled_Features.samplerAnisotropy)
+      {
+         // NOTE: For now, just select the first match.
+         bool Selected = (Physical_Device->Handle == VK_NULL_HANDLE);
+
+         Log("Physical Device %d (%s)\n", Physical_Index, Selected ? "selected" : "unused");
+         Log("   Name: %s\n", Properties.deviceName);
+
+         switch(Properties.deviceType)
+         {
+            case VK_PHYSICAL_DEVICE_TYPE_OTHER:          { Log("   Type: Other\n"); } break;
+            case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU: { Log("   Type: Integrated GPU\n"); } break;
+            case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:   { Log("   Type: Discrete GPU\n"); } break;
+            case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:    { Log("   Type: Virtual GPU\n"); } break;
+            case VK_PHYSICAL_DEVICE_TYPE_CPU:            { Log("   Type: CPU\n"); } break;
+            default: { Invalid_Code_Path; } break;
+         }
+
+         u32 Api_Major = VK_API_VERSION_MAJOR(Properties.apiVersion);
+         u32 Api_Minor = VK_API_VERSION_MINOR(Properties.apiVersion);
+         u32 Api_Patch = VK_API_VERSION_PATCH(Properties.apiVersion);
+         Log("   Supported API Version: %u.%u.%u\n", Api_Major, Api_Minor, Api_Patch);
+
+         u32 Driver_Major = VK_API_VERSION_MAJOR(Properties.driverVersion);
+         u32 Driver_Minor = VK_API_VERSION_MINOR(Properties.driverVersion);
+         u32 Driver_Patch = VK_API_VERSION_PATCH(Properties.driverVersion);
+         Log("   Driver Version: %u.%u.%u\n", Driver_Major, Driver_Minor, Driver_Patch);
+
+         if(Selected)
+         {
+            Physical_Device->Handle = Handle;
+            Physical_Device->Properties = Properties;
+         }
+      }
+   }
+
+   bool Result = (Physical_Device->Handle != VK_NULL_HANDLE);
+   return(Result);
+}
+
+static void Configure_Vulkan_Multisampling(vulkan_context *VK)
+{
+   // NOTE: We arbitrarily cap the sample count to 4 if MSAA is available. We
+   // can examine whether higher sample counts are worthwhile at some point.
+
+   VkSampleCountFlagBits Sample_Counts = (VK->Physical_Device.Properties.limits.framebufferColorSampleCounts &
+                                          VK->Physical_Device.Properties.limits.framebufferDepthSampleCounts);
+   if(Sample_Counts & VK_SAMPLE_COUNT_4_BIT)
+   {
+      VK->Multisample_Count = VK_SAMPLE_COUNT_4_BIT;
+   }
+   else if(Sample_Counts & VK_SAMPLE_COUNT_2_BIT)
+   {
+      VK->Multisample_Count = VK_SAMPLE_COUNT_2_BIT;
+   }
+   else
+   {
+      VK->Multisample_Count = VK_SAMPLE_COUNT_1_BIT;
+   }
+}
+
+static VkSurfaceKHR Create_Vulkan_Surface(VkInstance Instance, void *Platform_Context)
+{
+   VkSurfaceKHR Result = 0;
+
+   // NOTE: Create the platform-dependent surface. Ideally this is the only
+   // place in the Vulkan-specific code that needs to rely on
+   // platform-specific ifdefs.
+#if defined(VK_USE_PLATFORM_WAYLAND_KHR)
+   wayland_context *Wayland = Platform_Context;
+
+   VkWaylandSurfaceCreateInfoKHR Surface_Info = {0};
+   Surface_Info.sType = VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR;
+   Surface_Info.display = Wayland->Display;
+   Surface_Info.surface = Wayland->Surface;
+
+   VC(vkCreateWaylandSurfaceKHR(Instance, &Surface_Info, 0, &Result));
+#elif defined(VK_USE_PLATFORM_XLIB_KHR)
+   xlib_context *Xlib = Platform_Context;
+
+   VkXlibSurfaceCreateInfoKHR Surface_Info = {0};
+   Surface_Info.sType = VK_STRUCTURE_TYPE_XLIB_SURFACE_CREATE_INFO_KHR;
+   Surface_Info.dpy = Xlib->Display;
+   Surface_Info.window = Xlib->Window;
+   VC(vkCreateXlibSurfaceKHR(Instance, &Surface_Info, 0, &Result));
+#elif defined(VK_USE_PLATFORM_WIN32_KHR)
+   win32_context *Win32 = Platform_Context;
+
+   VkWin32SurfaceCreateInfoKHR Surface_Info = {0};
+   Surface_Info.sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR;
+   Surface_Info.hinstance = Win32->Instance;
+   Surface_Info.hwnd = Win32->Window;
+   VC(vkCreateWin32SurfaceKHR(Instance, &Surface_Info, 0, &Result));
+#else
+#  error Surface creation not yet implemented for this platform.
+#endif
+
+   return(Result);
+}
+
+static bool Create_Vulkan_Device(vulkan_context *VK)
+{
+   // NOTE: Swapchain support is not part of base Vulkan, and must be enabled
+   // as an extension.
+   const char *Required_Device_Extension_Names[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
+
+   VkPhysicalDevice Physical_Device = VK->Physical_Device.Handle;
+   bool Result = Vulkan_Device_Extensions_Supported(Physical_Device, Required_Device_Extension_Names, Array_Count(Required_Device_Extension_Names), VK->Scratch);
+   if(Result)
+   {
+      // NOTE: Enumerate the available queues.
+      u32 Queue_Family_Count;
+      vkGetPhysicalDeviceQueueFamilyProperties(Physical_Device, &Queue_Family_Count, 0);
+
+      VkQueueFamilyProperties *Queue_Families = Allocate(&VK->Scratch, VkQueueFamilyProperties, Queue_Family_Count);
+      vkGetPhysicalDeviceQueueFamilyProperties(Physical_Device, &Queue_Family_Count, Queue_Families);
+
+      // NOTE: This array length is just hard coded to the max number of
+      // potential queue families we might use.
+      u32 Queue_Info_Count = 0;
+      VkDeviceQueueCreateInfo Queue_Infos[3];
+
+      float Queue_Priorities[] = {1.0f};
+
+      // NOTE: For now, we want a queue for compute, graphics, and
+      // presentation. The same queue family can be reused for multiple purposes
+      // (e.g. both graphics and compute), but it should only be added to
+      // Queue_Infos once.
+      bool Compute_Queue_Family_Found = false;
+      bool Graphics_Queue_Family_Found = false;
+      bool Present_Queue_Family_Found = false;
+
+      for(u32 Family_Index = 0; Family_Index < Queue_Family_Count; ++Family_Index)
+      {
+         VkQueueFamilyProperties Family = Queue_Families[Family_Index];
+         bool Use_This_Family = false;
+
+         if(Family.queueFlags & VK_QUEUE_COMPUTE_BIT)
+         {
+            Use_This_Family = true;
+            Compute_Queue_Family_Found = true;
+            VK->Compute_Queue_Family_Index = Family_Index;
+         }
+
+         if(Family.queueFlags & VK_QUEUE_GRAPHICS_BIT)
+         {
+            Use_This_Family = true;
+            Graphics_Queue_Family_Found = true;
+            VK->Graphics_Queue_Family_Index = Family_Index;
+         }
+
+         VkBool32 Present_Support;
+         vkGetPhysicalDeviceSurfaceSupportKHR(VK->Physical_Device.Handle, Family_Index, VK->Surface, &Present_Support);
+         if(Present_Support)
+         {
+            Use_This_Family = true;
+            Present_Queue_Family_Found = true;
+            VK->Present_Queue_Family_Index = Family_Index;
+         }
+
+         if(Use_This_Family)
+         {
+            // NOTE: Queue families specified when creating the device must be
+            // unique, so just append creation info structs here. If we hit the
+            // max, we know we found them all.
+            if(Queue_Info_Count < Array_Count(Queue_Infos))
+            {
+               VkDeviceQueueCreateInfo Info = {0};
+               Info.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+               Info.queueFamilyIndex = Family_Index;
+               Info.queueCount = 1;
+               Info.pQueuePriorities = Queue_Priorities;
+
+               Queue_Infos[Queue_Info_Count++] = Info;
+            }
+            else
+            {
+               break;
+            }
+         }
+      }
+
+      Assert(Compute_Queue_Family_Found);
+      Assert(Graphics_Queue_Family_Found);
+      Assert(Present_Queue_Family_Found);
+
+      // NOTE: Create the logical device.
+      VkDeviceCreateInfo Device_Create_Info = {0};
+      Device_Create_Info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+      Device_Create_Info.queueCreateInfoCount = Queue_Info_Count;
+      Device_Create_Info.pQueueCreateInfos = Queue_Infos;
+      Device_Create_Info.enabledExtensionCount = Array_Count(Required_Device_Extension_Names);
+      Device_Create_Info.ppEnabledExtensionNames = Required_Device_Extension_Names;
+      Device_Create_Info.pEnabledFeatures = &VK->Physical_Device.Enabled_Features;
+
+      VC(vkCreateDevice(VK->Physical_Device.Handle, &Device_Create_Info, 0, &VK->Device));
+
+      vkGetDeviceQueue(VK->Device, VK->Compute_Queue_Family_Index, 0, &VK->Compute_Queue);
+      vkGetDeviceQueue(VK->Device, VK->Graphics_Queue_Family_Index, 0, &VK->Graphics_Queue);
+      vkGetDeviceQueue(VK->Device, VK->Present_Queue_Family_Index, 0, &VK->Present_Queue);
+   }
+
+   return(Result);
+}
+
 static VkImageView Create_Vulkan_Image_View(vulkan_context *VK, VkImage Image, VkFormat Format, VkImageAspectFlags Aspect)
 {
    VkImageViewCreateInfo View_Info = {0};
@@ -86,7 +358,7 @@ static u32 Get_Memory_Type(vulkan_context *VK, u32 Memory_Type_Bits, VkMemoryPro
    u32 Memory_Type_Found = false;
 
    VkPhysicalDeviceMemoryProperties Memory_Properties;
-   vkGetPhysicalDeviceMemoryProperties(VK->Physical_Device, &Memory_Properties);
+   vkGetPhysicalDeviceMemoryProperties(VK->Physical_Device.Handle, &Memory_Properties);
 
    for(u32 Type_Index = 0; Type_Index < Memory_Properties.memoryTypeCount; ++Type_Index)
    {
@@ -267,7 +539,7 @@ static vulkan_image Create_Vulkan_Depth_Image(vulkan_context *VK, u32 Width, u32
    VkFormatFeatureFlags Features = VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT;
 
    VkFormatProperties Properties;
-   vkGetPhysicalDeviceFormatProperties(VK->Physical_Device, Format, &Properties);
+   vkGetPhysicalDeviceFormatProperties(VK->Physical_Device.Handle, Format, &Properties);
 
    if((Properties.optimalTilingFeatures & Features) != Features)
    {
@@ -305,10 +577,8 @@ static void Destroy_Vulkan_Image(vulkan_context *VK, vulkan_image *Image)
    Zero_Struct(Image);
 }
 
-static void Destroy_Vulkan_Swapchain(vulkan_context *VK)
+static void Destroy_Vulkan_Swapchain(vulkan_context *VK, vulkan_swapchain *Swapchain)
 {
-   vulkan_swapchain *Swapchain = &VK->Swapchain;
-
    Destroy_Vulkan_Image(VK, &Swapchain->Color_Image);
    Destroy_Vulkan_Image(VK, &Swapchain->Depth_Image);
 
@@ -321,10 +591,10 @@ static void Destroy_Vulkan_Swapchain(vulkan_context *VK)
    vkDestroySwapchainKHR(VK->Device, Swapchain->Handle, 0);
 }
 
-static void Create_Vulkan_Swapchain(vulkan_context *VK)
+static void Create_Vulkan_Swapchain(vulkan_context *VK, vulkan_swapchain *Swapchain)
 {
    VkSurfaceCapabilitiesKHR Surface_Capabilities;
-   vkGetPhysicalDeviceSurfaceCapabilitiesKHR(VK->Physical_Device, VK->Surface, &Surface_Capabilities);
+   vkGetPhysicalDeviceSurfaceCapabilitiesKHR(VK->Physical_Device.Handle, VK->Surface, &Surface_Capabilities);
 
    VK->Swapchain.Image_Count = Surface_Capabilities.minImageCount + 1;
    if(Surface_Capabilities.maxImageCount == 0)
@@ -343,11 +613,11 @@ static void Create_Vulkan_Swapchain(vulkan_context *VK)
    }
 
    u32 Surface_Format_Count = 0;
-   vkGetPhysicalDeviceSurfaceFormatsKHR(VK->Physical_Device, VK->Surface, &Surface_Format_Count, 0);
+   vkGetPhysicalDeviceSurfaceFormatsKHR(VK->Physical_Device.Handle, VK->Surface, &Surface_Format_Count, 0);
    Assert(Surface_Format_Count > 0);
 
    VkSurfaceFormatKHR *Surface_Formats = Allocate(&VK->Scratch, VkSurfaceFormatKHR, Surface_Format_Count);
-   vkGetPhysicalDeviceSurfaceFormatsKHR(VK->Physical_Device, VK->Surface, &Surface_Format_Count, Surface_Formats);
+   vkGetPhysicalDeviceSurfaceFormatsKHR(VK->Physical_Device.Handle, VK->Surface, &Surface_Format_Count, Surface_Formats);
 
    bool Desired_Format_Supported = false;
    VkSurfaceFormatKHR Desired_Format;
@@ -367,11 +637,11 @@ static void Create_Vulkan_Swapchain(vulkan_context *VK)
    VK->Swapchain.Image_Format = Desired_Format.format;
 
    u32 Present_Mode_Count;
-   vkGetPhysicalDeviceSurfacePresentModesKHR(VK->Physical_Device, VK->Surface, &Present_Mode_Count, 0);
+   vkGetPhysicalDeviceSurfacePresentModesKHR(VK->Physical_Device.Handle, VK->Surface, &Present_Mode_Count, 0);
    Assert(Present_Mode_Count > 0);
 
    VkPresentModeKHR *Present_Modes = Allocate(&VK->Scratch, VkPresentModeKHR, Present_Mode_Count);
-   vkGetPhysicalDeviceSurfacePresentModesKHR(VK->Physical_Device, VK->Surface, &Present_Mode_Count, Present_Modes);
+   vkGetPhysicalDeviceSurfacePresentModesKHR(VK->Physical_Device.Handle, VK->Surface, &Present_Mode_Count, Present_Modes);
 
    VkPresentModeKHR Desired_Present_Mode = VK_PRESENT_MODE_FIFO_KHR;
    bool Desired_Present_Mode_Found = false;
@@ -443,10 +713,10 @@ static void Create_Vulkan_Swapchain(vulkan_context *VK)
    VC(vkCreateSwapchainKHR(VK->Device, &Swapchain_Info, 0, &VK->Swapchain.Handle));
 
    vkGetSwapchainImagesKHR(VK->Device, VK->Swapchain.Handle, &VK->Swapchain.Image_Count, 0);
-   VK->Swapchain.Images = Allocate(&VK->Arena, VkImage, VK->Swapchain.Image_Count);
+   VK->Swapchain.Images = Allocate(&VK->Permanent, VkImage, VK->Swapchain.Image_Count);
    vkGetSwapchainImagesKHR(VK->Device, VK->Swapchain.Handle, &VK->Swapchain.Image_Count, VK->Swapchain.Images);
 
-   VK->Swapchain.Image_Views = Allocate(&VK->Arena, VkImageView, VK->Swapchain.Image_Count);
+   VK->Swapchain.Image_Views = Allocate(&VK->Permanent, VkImageView, VK->Swapchain.Image_Count);
    for(u32 Image_Index = 0; Image_Index < VK->Swapchain.Image_Count; ++Image_Index)
    {
       VK->Swapchain.Image_Views[Image_Index] = Create_Vulkan_Image_View(VK, VK->Swapchain.Images[Image_Index], VK->Swapchain.Image_Format, VK_IMAGE_ASPECT_COLOR_BIT);
@@ -454,7 +724,7 @@ static void Create_Vulkan_Swapchain(vulkan_context *VK)
 
    if(!VK->Swapchain.Render_Finished_Semaphores)
    {
-      VK->Swapchain.Render_Finished_Semaphores = Allocate(&VK->Arena, VkSemaphore, VK->Swapchain.Max_Image_Count);
+      VK->Swapchain.Render_Finished_Semaphores = Allocate(&VK->Permanent, VkSemaphore, VK->Swapchain.Max_Image_Count);
    }
    for(u32 Image_Index = 0; Image_Index < VK->Swapchain.Image_Count; ++Image_Index)
    {
@@ -464,7 +734,7 @@ static void Create_Vulkan_Swapchain(vulkan_context *VK)
    }
 }
 
-static void Create_Vulkan_Swapchain_Framebuffers(vulkan_context *VK, VkRenderPass Render_Pass)
+static void Create_Vulkan_Swapchain_Framebuffers(vulkan_context *VK, vulkan_swapchain *Swapchain, VkRenderPass Render_Pass, arena *Arena)
 {
    // NOTE: Allocate framebuffers based on the maximum number of swapchain
    // images supported by the surface so we don't need to free anything on
@@ -472,18 +742,18 @@ static void Create_Vulkan_Swapchain_Framebuffers(vulkan_context *VK, VkRenderPas
    // zero-initialized the first time through and (2) the underlying arena has
    // the same lifetime as the surface. In practice this probably doesn't
    // matter, and we'll always have 2 or 3 images.
-   if(!VK->Swapchain.Framebuffers)
+   if(Arena)
    {
-      VK->Swapchain.Framebuffers = Allocate(&VK->Arena, VkFramebuffer, VK->Swapchain.Max_Image_Count);
+      Swapchain->Framebuffers = Allocate(Arena, VkFramebuffer, Swapchain->Max_Image_Count);
    }
 
-   for(u32 Image_Index = 0; Image_Index < VK->Swapchain.Image_Count; ++Image_Index)
+   for(u32 Image_Index = 0; Image_Index < Swapchain->Image_Count; ++Image_Index)
    {
       VkImageView Attachments[] =
       {
-         VK->Swapchain.Color_Image.View,
-         VK->Swapchain.Depth_Image.View,
-         VK->Swapchain.Image_Views[Image_Index],
+         Swapchain->Color_Image.View,
+         Swapchain->Depth_Image.View,
+         Swapchain->Image_Views[Image_Index],
       };
 
       VkFramebufferCreateInfo Framebuffer_Info = {0};
@@ -491,11 +761,11 @@ static void Create_Vulkan_Swapchain_Framebuffers(vulkan_context *VK, VkRenderPas
       Framebuffer_Info.renderPass = Render_Pass;
       Framebuffer_Info.attachmentCount = Array_Count(Attachments);
       Framebuffer_Info.pAttachments = Attachments;
-      Framebuffer_Info.width = VK->Swapchain.Extent.width;
-      Framebuffer_Info.height = VK->Swapchain.Extent.height;
+      Framebuffer_Info.width = Swapchain->Extent.width;
+      Framebuffer_Info.height = Swapchain->Extent.height;
       Framebuffer_Info.layers = 1;
 
-      VC(vkCreateFramebuffer(VK->Device, &Framebuffer_Info, 0, VK->Swapchain.Framebuffers + Image_Index));
+      VC(vkCreateFramebuffer(VK->Device, &Framebuffer_Info, 0, Swapchain->Framebuffers + Image_Index));
    }
 }
 
@@ -512,12 +782,12 @@ static void Copy_Vulkan_Buffer(vulkan_context *VK, VkBuffer Destination, VkBuffe
    End_Onetime_Vulkan_Commands(VK, Command_Buffer);
 }
 
-static void Recreate_Vulkan_Swapchain(vulkan_context *VK)
+static void Recreate_Vulkan_Swapchain(vulkan_context *VK, vulkan_swapchain *Swapchain)
 {
    vkDeviceWaitIdle(VK->Device);
-   Destroy_Vulkan_Swapchain(VK);
-   Create_Vulkan_Swapchain(VK);
-   Create_Vulkan_Swapchain_Framebuffers(VK, VK->Basic_Render_Pass);
+   Destroy_Vulkan_Swapchain(VK, Swapchain);
+   Create_Vulkan_Swapchain(VK, Swapchain);
+   Create_Vulkan_Swapchain_Framebuffers(VK, &VK->Swapchain, VK->Basic_Render_Pass, 0);
 }
 
 static vulkan_buffer Create_Vulkan_Buffer(vulkan_context *VK, size Size, VkBufferUsageFlags Usage, VkMemoryPropertyFlags Properties)
@@ -699,8 +969,8 @@ static void Create_Vulkan_Texture_Sampler(vulkan_context *VK, VkSampler *Sampler
    Sampler_Info.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
    Sampler_Info.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
    Sampler_Info.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-   Sampler_Info.anisotropyEnable = VK->Enabled_Physical_Device_Features.samplerAnisotropy;
-   Sampler_Info.maxAnisotropy = (VK->Enabled_Physical_Device_Features.samplerAnisotropy) ? VK->Physical_Device_Properties.limits.maxSamplerAnisotropy : 1.0f;
+   Sampler_Info.anisotropyEnable = VK->Physical_Device.Enabled_Features.samplerAnisotropy;
+   Sampler_Info.maxAnisotropy = (VK->Physical_Device.Enabled_Features.samplerAnisotropy) ? VK->Physical_Device.Properties.limits.maxSamplerAnisotropy : 1.0f;
    Sampler_Info.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
    Sampler_Info.unnormalizedCoordinates = VK_FALSE;
    Sampler_Info.compareEnable = VK_FALSE;
@@ -764,7 +1034,7 @@ static void Create_Basic_Vulkan_Descriptor_Set(vulkan_context *VK)
       VkDescriptorBufferInfo Uniform_Info = {0};
       Uniform_Info.buffer = Frame->Uniform.Buffer;
       Uniform_Info.offset = 0;
-      Uniform_Info.range = sizeof(uniform_buffer_object);
+      Uniform_Info.range = sizeof(basic_uniform);
 
       VkDescriptorImageInfo Image_Info = {0};
       Image_Info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
@@ -1060,7 +1330,7 @@ static vulkan_pipeline Create_Basic_Vulkan_Graphics_Pipeline(vulkan_context *VK,
 
 static INITIALIZE_VULKAN(Initialize_Vulkan)
 {
-   bool Initialized = true;
+   bool Initialized = false;
 
    // NOTE: The platform context contains whatever information Vulkan needs that
    // varies per platform. At the moment, that includes window information for
@@ -1069,327 +1339,100 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
 
    // NOTE: If we're initializing Vulkan multiple times for some reason, these
    // arenas can just be reused.
-   Make_Arena_Once(&VK->Arena, Megabytes(256));
+   Make_Arena_Once(&VK->Permanent, Megabytes(256));
    Make_Arena_Once(&VK->Scratch, Megabytes(256));
 
    // NOTE: Load assets that are needed at start up.
-   Parse_GLB(&VK->Debug_Scene, &VK->Arena, VK->Scratch, "../data/monkey.glb");
+   Parse_GLB(&VK->Debug_Scene, &VK->Permanent, VK->Scratch, "../data/monkey.glb");
 
-   // NOTE: Initialize the Vulkan instance.
-   VkApplicationInfo Application_Info = {0};
-   Application_Info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-   Application_Info.pApplicationName = "Vulkan Renderer";
-   Application_Info.applicationVersion = 1;
-   Application_Info.apiVersion = VK_API_VERSION_1_0;
-
-   const char *Instance_Extension_Names[] =
+   if(Create_Vulkan_Instance(&VK->Instance, VK->Scratch))
    {
-#if DEBUG
-      VK_EXT_DEBUG_UTILS_EXTENSION_NAME,
-#endif
-      VK_KHR_SURFACE_EXTENSION_NAME,
-      PLATFORM_SURFACE_EXTENSION_NAME,
-   };
-
-   Initialized = Vulkan_Instance_Extensions_Supported(Instance_Extension_Names, Array_Count(Instance_Extension_Names), VK->Scratch);
-   if(Initialized)
-   {
-      VkInstanceCreateInfo Instance_Info = {0};
-      Instance_Info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-      Instance_Info.pApplicationInfo = &Application_Info;
-      Instance_Info.enabledExtensionCount = Array_Count(Instance_Extension_Names);
-      Instance_Info.ppEnabledExtensionNames = Instance_Extension_Names;
-#if DEBUG
-      const char *Required_Layer_Names[] = {"VK_LAYER_KHRONOS_validation"};
-      Instance_Info.enabledLayerCount = Array_Count(Required_Layer_Names);
-      Instance_Info.ppEnabledLayerNames = Required_Layer_Names;
-#endif
-
-      VC(vkCreateInstance(&Instance_Info, 0, &VK->Instance));
-
-      // NOTE: Enumerate the available physical devices.
-      u32 Physical_Count = 0;
-      VC(vkEnumeratePhysicalDevices(VK->Instance, &Physical_Count, 0));
-      Assert(Physical_Count > 0);
-
-      VkPhysicalDevice *Physical_Devices = Allocate(&VK->Scratch, VkPhysicalDevice, Physical_Count);
-      VC(vkEnumeratePhysicalDevices(VK->Instance, &Physical_Count, Physical_Devices));
-
-      // NOTE: For now, any features enabled in this struct need to be kept in sync
-      // with the physical device check below.
-      Zero_Struct(&VK->Enabled_Physical_Device_Features);
-      VK->Enabled_Physical_Device_Features.samplerAnisotropy = VK_TRUE;
-
-      // NOTE: Choose a physical device.
-      VK->Physical_Device = VK_NULL_HANDLE;
-      for(u32 Physical_Index = 0; Physical_Index < Physical_Count; ++Physical_Index)
+      if(Choose_Vulkan_Physical_Device(&VK->Physical_Device, VK->Instance, VK->Scratch))
       {
-         VkPhysicalDevice Physical_Device = Physical_Devices[Physical_Index];
+         Configure_Vulkan_Multisampling(VK);
 
-         VkPhysicalDeviceProperties Properties;
-         vkGetPhysicalDeviceProperties(Physical_Device, &Properties);
-
-         VkPhysicalDeviceFeatures Features;
-         vkGetPhysicalDeviceFeatures(Physical_Device, &Features);
-
-         if(Features.samplerAnisotropy == VK->Enabled_Physical_Device_Features.samplerAnisotropy)
+         VK->Surface = Create_Vulkan_Surface(VK->Instance, Platform_Context);
+         if(Create_Vulkan_Device(VK))
          {
-            bool Selected = VK->Physical_Device == VK_NULL_HANDLE; // NOTE: For now, just select the first match.
-            Log("Physical Device %d (%s)\n", Physical_Index, Selected ? "selected" : "unused");
-            Log("   Name: %s\n", Properties.deviceName);
+            // NOTE: Create command buffers.
+            VkCommandPoolCreateInfo Pool_Info = {0};
+            Pool_Info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+            Pool_Info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+            Pool_Info.queueFamilyIndex = VK->Graphics_Queue_Family_Index;
+            VC(vkCreateCommandPool(VK->Device, &Pool_Info, 0, &VK->Command_Pool));
 
-            switch(Properties.deviceType)
+            VkCommandBufferAllocateInfo Allocate_Info = {0};
+            Allocate_Info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+            Allocate_Info.commandPool = VK->Command_Pool;
+            Allocate_Info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+            Allocate_Info.commandBufferCount = MAX_FRAMES_IN_FLIGHT;
+
+            VkCommandBuffer Command_Buffers[MAX_FRAMES_IN_FLIGHT] = {0};
+            VC(vkAllocateCommandBuffers(VK->Device, &Allocate_Info, Command_Buffers));
+
+            for(int Frame_Index = 0; Frame_Index < MAX_FRAMES_IN_FLIGHT; ++Frame_Index)
             {
-               case VK_PHYSICAL_DEVICE_TYPE_OTHER:          { Log("   Type: Other\n"); } break;
-               case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU: { Log("   Type: Integrated GPU\n"); } break;
-               case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:   { Log("   Type: Discrete GPU\n"); } break;
-               case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:    { Log("   Type: Virtual GPU\n"); } break;
-               case VK_PHYSICAL_DEVICE_TYPE_CPU:            { Log("   Type: CPU\n"); } break;
-               default: { Invalid_Code_Path; } break;
+               VK->Frames[Frame_Index].Command_Buffer = Command_Buffers[Frame_Index];
             }
 
-            u32 Api_Major = VK_API_VERSION_MAJOR(Properties.apiVersion);
-            u32 Api_Minor = VK_API_VERSION_MINOR(Properties.apiVersion);
-            u32 Api_Patch = VK_API_VERSION_PATCH(Properties.apiVersion);
-            Log("   Supported API Version: %u.%u.%u\n", Api_Major, Api_Minor, Api_Patch);
+            // NOTE: Initialize swap chain.
+            Create_Vulkan_Swapchain(VK, &VK->Swapchain);
 
-            u32 Driver_Major = VK_API_VERSION_MAJOR(Properties.driverVersion);
-            u32 Driver_Minor = VK_API_VERSION_MINOR(Properties.driverVersion);
-            u32 Driver_Patch = VK_API_VERSION_PATCH(Properties.driverVersion);
-            Log("   Driver Version: %u.%u.%u\n", Driver_Major, Driver_Minor, Driver_Patch);
+            // NOTE: Create buffers.
+            gltf_primitive Debug_Primitive = VK->Debug_Scene.Meshes[0].Primitives[0];
+            VK->Vertex_Positions = Create_Vulkan_Vertex_Buffer(VK, &VK->Debug_Scene, Debug_Primitive.Position);
+            VK->Vertex_Normals   = Create_Vulkan_Vertex_Buffer(VK, &VK->Debug_Scene, Debug_Primitive.Normal);
+            VK->Vertex_Colors    = Create_Vulkan_Vertex_Buffer(VK, &VK->Debug_Scene, Debug_Primitive.Color_0);
+            VK->Vertex_Texcoords = Create_Vulkan_Vertex_Buffer(VK, &VK->Debug_Scene, Debug_Primitive.Texcoord_0);
 
-            if(Selected)
+            VK->Vertex_Indices = Create_Vulkan_Index_Buffer(VK, &VK->Debug_Scene, Debug_Primitive.Indices);
+            for(int Frame_Index = 0; Frame_Index < MAX_FRAMES_IN_FLIGHT; ++Frame_Index)
             {
-               VK->Physical_Device = Physical_Device;
-               VK->Physical_Device_Properties = Properties;
+               size Size = sizeof(basic_uniform);
+               VkBufferUsageFlags Usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+               VkMemoryPropertyFlags Properties = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+
+               vulkan_frame *Frame = VK->Frames + Frame_Index;
+               Frame->Uniform = Create_Vulkan_Buffer(VK, Size, Usage, Properties);
+               VC(vkMapMemory(VK->Device, Frame->Uniform.Device_Memory, 0, Size, 0, &Frame->Uniform.Mapped_Memory_Address));
             }
-         }
-      }
-      Assert(VK->Physical_Device != VK_NULL_HANDLE);
 
-      // NOTE: Here we arbitrarily cap the sample count to 4 if MSAA is
-      // available. We can examine whether higher sample counts are worthwhile
-      // at some point.
-      VkSampleCountFlagBits Sample_Counts = (VK->Physical_Device_Properties.limits.framebufferColorSampleCounts &
-                                             VK->Physical_Device_Properties.limits.framebufferDepthSampleCounts);
-      if(Sample_Counts & VK_SAMPLE_COUNT_4_BIT)
-      {
-         VK->Multisample_Count = VK_SAMPLE_COUNT_4_BIT;
-      }
-      else if(Sample_Counts & VK_SAMPLE_COUNT_2_BIT)
-      {
-         VK->Multisample_Count = VK_SAMPLE_COUNT_2_BIT;
-      }
-      else
-      {
-         VK->Multisample_Count = VK_SAMPLE_COUNT_1_BIT;
-      }
+            // NOTE: Create images.
+            VK->Debug_Texture = Create_Vulkan_Texture_Image(VK, Debug_Texture_Memory, Debug_Texture_Width, Debug_Texture_Height, VK_FORMAT_R8G8B8A8_SRGB);
+            VK->Debug_Text = Create_Vulkan_Texture_Image(VK, Debug_Glyph_Memory_48, Debug_Glyph_Width, Debug_Glyph_Height, VK_FORMAT_R8_UNORM);
 
-      // NOTE: Create the platform-dependent surface. Ideally this is the only
-      // place in the Vulkan-specific code that needs to rely on
-      // platform-specific ifdefs.
-#if defined(VK_USE_PLATFORM_WAYLAND_KHR)
-      wayland_context *Wayland = Platform_Context;
+            // NOTE: Create samplers.
+            Create_Vulkan_Texture_Sampler(VK, &VK->Texture_Sampler);
 
-      VkWaylandSurfaceCreateInfoKHR Surface_Info = {0};
-      Surface_Info.sType = VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR;
-      Surface_Info.display = Wayland->Display;
-      Surface_Info.surface = Wayland->Surface;
+            // NOTE: Create descriptor sets.
+            Create_Basic_Vulkan_Descriptor_Set(VK);
 
-      VC(vkCreateWaylandSurfaceKHR(VK->Instance, &Surface_Info, 0, &VK->Surface));
-#elif defined(VK_USE_PLATFORM_XLIB_KHR)
-      xlib_context *Xlib = Platform_Context;
+            // NOTE: Initialize render passes.
+            VK->Basic_Render_Pass = Create_Basic_Vulkan_Render_Passes(VK);
 
-      VkXlibSurfaceCreateInfoKHR Surface_Info = {0};
-      Surface_Info.sType = VK_STRUCTURE_TYPE_XLIB_SURFACE_CREATE_INFO_KHR;
-      Surface_Info.dpy = Xlib->Display;
-      Surface_Info.window = Xlib->Window;
-      VC(vkCreateXlibSurfaceKHR(VK->Instance, &Surface_Info, 0, &VK->Surface));
-#elif defined(VK_USE_PLATFORM_WIN32_KHR)
-      win32_context *Win32 = Platform_Context;
+            // NOTE: Initialize pipelines.
+            VK->Basic_Graphics_Pipeline = Create_Basic_Vulkan_Graphics_Pipeline(VK, VK->Basic_Render_Pass);
 
-      VkWin32SurfaceCreateInfoKHR Surface_Info = {0};
-      Surface_Info.sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR;
-      Surface_Info.hinstance = Win32->Instance;
-      Surface_Info.hwnd = Win32->Window;
-      VC(vkCreateWin32SurfaceKHR(VK->Instance, &Surface_Info, 0, &VK->Surface));
-#else
-#  error Surface creation not yet implemented for this platform.
-#endif
+            // NOTE: Create the swapchain's framebuffers independently of the
+            // swapchain so a render pass is available.
+            Create_Vulkan_Swapchain_Framebuffers(VK, &VK->Swapchain, VK->Basic_Render_Pass, &VK->Permanent);
 
-      // NOTE: Enumerate the available queues.
-      u32 Queue_Family_Count;
-      vkGetPhysicalDeviceQueueFamilyProperties(VK->Physical_Device, &Queue_Family_Count, 0);
-
-      VkQueueFamilyProperties *Queue_Families = Allocate(&VK->Scratch, VkQueueFamilyProperties, Queue_Family_Count);
-      vkGetPhysicalDeviceQueueFamilyProperties(VK->Physical_Device, &Queue_Family_Count, Queue_Families);
-
-      // NOTE: This array length is just hard coded to the max number of
-      // potential queue families we might use.
-      u32 Queue_Info_Count = 0;
-      VkDeviceQueueCreateInfo Queue_Infos[3];
-
-      float Queue_Priorities[] = {1.0f};
-
-      // NOTE: For now, we want a queue for compute, graphics, and
-      // presentation. The same queue family can be reused for multiple purposes
-      // (e.g. both graphics and compute), but it should only be added to
-      // Queue_Infos once.
-      bool Compute_Queue_Family_Found = false;
-      bool Graphics_Queue_Family_Found = false;
-      bool Present_Queue_Family_Found = false;
-
-      for(u32 Family_Index = 0; Family_Index < Queue_Family_Count; ++Family_Index)
-      {
-         VkQueueFamilyProperties Family = Queue_Families[Family_Index];
-         bool Use_This_Family = false;
-
-         if(Family.queueFlags & VK_QUEUE_COMPUTE_BIT)
-         {
-            Use_This_Family = true;
-            Compute_Queue_Family_Found = true;
-            VK->Compute_Queue_Family_Index = Family_Index;
-         }
-
-         if(Family.queueFlags & VK_QUEUE_GRAPHICS_BIT)
-         {
-            Use_This_Family = true;
-            Graphics_Queue_Family_Found = true;
-            VK->Graphics_Queue_Family_Index = Family_Index;
-         }
-
-         VkBool32 Present_Support;
-         vkGetPhysicalDeviceSurfaceSupportKHR(VK->Physical_Device, Family_Index, VK->Surface, &Present_Support);
-         if(Present_Support)
-         {
-            Use_This_Family = true;
-            Present_Queue_Family_Found = true;
-            VK->Present_Queue_Family_Index = Family_Index;
-         }
-
-         if(Use_This_Family)
-         {
-            // NOTE: Queue families specified when creating the device must be
-            // unique, so just append creation info structs here. If we hit the
-            // max, we know we found them all.
-            if(Queue_Info_Count < Array_Count(Queue_Infos))
+            // NOTE: Configure frame synchronization.
+            for(int Frame_Index = 0; Frame_Index < MAX_FRAMES_IN_FLIGHT; ++Frame_Index)
             {
-               VkDeviceQueueCreateInfo Info = {0};
-               Info.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-               Info.queueFamilyIndex = Family_Index;
-               Info.queueCount = 1;
-               Info.pQueuePriorities = Queue_Priorities;
+               vulkan_frame *Frame = VK->Frames + Frame_Index;
 
-               Queue_Infos[Queue_Info_Count++] = Info;
+               VkSemaphoreCreateInfo Semaphore_Info = {0};
+               Semaphore_Info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+               VC(vkCreateSemaphore(VK->Device, &Semaphore_Info, 0, &Frame->Image_Available_Semaphore));
+
+               VkFenceCreateInfo Fence_Info = {0};
+               Fence_Info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+               Fence_Info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+               VC(vkCreateFence(VK->Device, &Fence_Info, 0, &Frame->In_Flight_Fence));
             }
-            else
-            {
-               break;
-            }
-         }
-      }
-      Assert(Compute_Queue_Family_Found);
-      Assert(Graphics_Queue_Family_Found);
-      Assert(Present_Queue_Family_Found);
 
-      // NOTE: Swapchain support is not part of base Vulkan, and must be enabled
-      // as an extension.
-      const char *Required_Device_Extension_Names[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
-      Initialized = Vulkan_Device_Extensions_Supported(VK->Physical_Device, Required_Device_Extension_Names, Array_Count(Required_Device_Extension_Names), VK->Scratch);
-      if(Initialized)
-      {
-         // NOTE: Create the logical device.
-         VkDeviceCreateInfo Device_Create_Info = {0};
-         Device_Create_Info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-         Device_Create_Info.queueCreateInfoCount = Queue_Info_Count;
-         Device_Create_Info.pQueueCreateInfos = Queue_Infos;
-         Device_Create_Info.enabledExtensionCount = Array_Count(Required_Device_Extension_Names);
-         Device_Create_Info.ppEnabledExtensionNames = Required_Device_Extension_Names;
-         Device_Create_Info.pEnabledFeatures = &VK->Enabled_Physical_Device_Features;
-
-         VC(vkCreateDevice(VK->Physical_Device, &Device_Create_Info, 0, &VK->Device));
-
-         vkGetDeviceQueue(VK->Device, VK->Compute_Queue_Family_Index, 0, &VK->Compute_Queue);
-         vkGetDeviceQueue(VK->Device, VK->Graphics_Queue_Family_Index, 0, &VK->Graphics_Queue);
-         vkGetDeviceQueue(VK->Device, VK->Present_Queue_Family_Index, 0, &VK->Present_Queue);
-
-         // NOTE: Create command buffers.
-         VkCommandPoolCreateInfo Pool_Info = {0};
-         Pool_Info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-         Pool_Info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-         Pool_Info.queueFamilyIndex = VK->Graphics_Queue_Family_Index;
-
-         VC(vkCreateCommandPool(VK->Device, &Pool_Info, 0, &VK->Command_Pool));
-
-         VkCommandBuffer Command_Buffers[MAX_FRAMES_IN_FLIGHT] = {0};
-
-         VkCommandBufferAllocateInfo Allocate_Info = {0};
-         Allocate_Info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-         Allocate_Info.commandPool = VK->Command_Pool;
-         Allocate_Info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-         Allocate_Info.commandBufferCount = Array_Count(Command_Buffers);
-
-         VC(vkAllocateCommandBuffers(VK->Device, &Allocate_Info, Command_Buffers));
-         for(int Frame_Index = 0; Frame_Index < MAX_FRAMES_IN_FLIGHT; ++Frame_Index)
-         {
-            VK->Frames[Frame_Index].Command_Buffer = Command_Buffers[Frame_Index];
-         }
-
-         // NOTE: Initialize swap chain.
-         Create_Vulkan_Swapchain(VK);
-
-         // NOTE: Create buffers.
-         gltf_primitive Debug_Primitive = VK->Debug_Scene.Meshes[0].Primitives[0];
-         VK->Vertex_Positions = Create_Vulkan_Vertex_Buffer(VK, &VK->Debug_Scene, Debug_Primitive.Position);
-         VK->Vertex_Normals   = Create_Vulkan_Vertex_Buffer(VK, &VK->Debug_Scene, Debug_Primitive.Normal);
-         VK->Vertex_Colors    = Create_Vulkan_Vertex_Buffer(VK, &VK->Debug_Scene, Debug_Primitive.Color_0);
-         VK->Vertex_Texcoords = Create_Vulkan_Vertex_Buffer(VK, &VK->Debug_Scene, Debug_Primitive.Texcoord_0);
-
-         VK->Vertex_Indices = Create_Vulkan_Index_Buffer(VK, &VK->Debug_Scene, Debug_Primitive.Indices);
-         for(int Frame_Index = 0; Frame_Index < MAX_FRAMES_IN_FLIGHT; ++Frame_Index)
-         {
-            size Size = sizeof(uniform_buffer_object);
-            VkBufferUsageFlags Usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-            VkMemoryPropertyFlags Properties = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-
-            vulkan_frame *Frame = VK->Frames + Frame_Index;
-            Frame->Uniform = Create_Vulkan_Buffer(VK, Size, Usage, Properties);
-            VC(vkMapMemory(VK->Device, Frame->Uniform.Device_Memory, 0, Size, 0, &Frame->Uniform.Mapped_Memory_Address));
-         }
-
-         // NOTE: Create images.
-         VK->Debug_Texture = Create_Vulkan_Texture_Image(VK, Debug_Texture_Memory, Debug_Texture_Width, Debug_Texture_Height, VK_FORMAT_R8G8B8A8_SRGB);
-         VK->Debug_Text = Create_Vulkan_Texture_Image(VK, Debug_Glyph_Memory_48, Debug_Glyph_Width, Debug_Glyph_Height, VK_FORMAT_R8_UNORM);
-
-         // NOTE: Create samplers.
-         Create_Vulkan_Texture_Sampler(VK, &VK->Texture_Sampler);
-
-         // NOTE: Create descriptor sets.
-         Create_Basic_Vulkan_Descriptor_Set(VK);
-
-         // NOTE: Initialize render passes.
-         VK->Basic_Render_Pass = Create_Basic_Vulkan_Render_Passes(VK);
-
-         // NOTE: Initialize pipelines.
-         VK->Basic_Graphics_Pipeline = Create_Basic_Vulkan_Graphics_Pipeline(VK, VK->Basic_Render_Pass);
-
-         // NOTE: Create the swapchain's framebuffers independently of the
-         // swapchain so a render pass is available.
-         Create_Vulkan_Swapchain_Framebuffers(VK, VK->Basic_Render_Pass);
-
-         // NOTE: Configure frame synchronization.
-         for(int Frame_Index = 0; Frame_Index < MAX_FRAMES_IN_FLIGHT; ++Frame_Index)
-         {
-            vulkan_frame *Frame = VK->Frames + Frame_Index;
-
-            VkSemaphoreCreateInfo Semaphore_Info = {0};
-            Semaphore_Info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-            VC(vkCreateSemaphore(VK->Device, &Semaphore_Info, 0, &Frame->Image_Available_Semaphore));
-
-            VkFenceCreateInfo Fence_Info = {0};
-            Fence_Info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-            Fence_Info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-            VC(vkCreateFence(VK->Device, &Fence_Info, 0, &Frame->In_Flight_Fence));
+            Initialized = true;
          }
       }
    }
@@ -1415,7 +1458,7 @@ static RENDER_WITH_VULKAN(Render_With_Vulkan)
    VkResult Image_Acquisition_Result = vkAcquireNextImageKHR(VK->Device, VK->Swapchain.Handle, UINT64_MAX, Frame->Image_Available_Semaphore, VK_NULL_HANDLE, &Image_Index);
    if(Image_Acquisition_Result == VK_ERROR_OUT_OF_DATE_KHR)
    {
-      Recreate_Vulkan_Swapchain(VK);
+      Recreate_Vulkan_Swapchain(VK, &VK->Swapchain);
    }
    else
    {
@@ -1502,7 +1545,7 @@ static RENDER_WITH_VULKAN(Render_With_Vulkan)
       vec3 Eye = {5.0f*S, 5.0f*C, 5.0f + 2.5f*S};
       vec3 Target = {0, 0, 0};
 
-      uniform_buffer_object UBO = {0};
+      basic_uniform UBO = {0};
       UBO.Model = Identity(); // Rotate_Y(C);
       UBO.View = Look_At(Eye, Target);
       UBO.Projection = Perspective(VK->Swapchain.Extent.width, VK->Swapchain.Extent.height, 0.1f, 100.0f);
@@ -1547,7 +1590,7 @@ static RENDER_WITH_VULKAN(Render_With_Vulkan)
       if(Present_Result == VK_ERROR_OUT_OF_DATE_KHR || Present_Result == VK_SUBOPTIMAL_KHR || VK->Resize_Requested)
       {
          VK->Resize_Requested = false;
-         Recreate_Vulkan_Swapchain(VK);
+         Recreate_Vulkan_Swapchain(VK, &VK->Swapchain);
       }
       else
       {
@@ -1575,7 +1618,7 @@ static DESTROY_VULKAN(Destroy_Vulkan)
          vkFreeMemory(VK->Device, Frame->Uniform.Device_Memory, 0);
       }
 
-      Destroy_Vulkan_Swapchain(VK);
+      Destroy_Vulkan_Swapchain(VK, &VK->Swapchain);
       vkDestroyCommandPool(VK->Device, VK->Command_Pool, 0);
 
       vkDestroySampler(VK->Device, VK->Texture_Sampler, 0);
@@ -1603,7 +1646,6 @@ static DESTROY_VULKAN(Destroy_Vulkan)
       vkDestroyShaderModule(VK->Device, VK->Basic_Graphics_Pipeline.Vertex_Shader, 0);
 
       vkDestroyDevice(VK->Device, 0);
-      VK->Device = 0;
    }
 
    if(VK->Instance)
@@ -1613,6 +1655,16 @@ static DESTROY_VULKAN(Destroy_Vulkan)
          vkDestroySurfaceKHR(VK->Instance, VK->Surface, 0);
       }
       vkDestroyInstance(VK->Instance, 0);
-      VK->Instance = 0;
    }
+
+   // NOTE: Allow the arenas to persist when clearing out the current state. If
+   // we wanted to parameterize the arena sizes in Initialize_Vulkan, we would
+   // instead destroy them here.
+   arena Permanent = VK->Permanent;
+   arena Scratch = VK->Scratch;
+
+   Zero_Struct(VK);
+
+   VK->Permanent = Permanent;
+   VK->Scratch = Scratch;
 }
