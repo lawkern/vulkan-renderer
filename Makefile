@@ -1,5 +1,5 @@
 .POSIX:
-CFLAGS = -g3 -std=c99 -DDEBUG -D_DEFAULT_SOURCE $(WARNINGS)
+CFLAGS = -g3 -std=c99 -D_DEFAULT_SOURCE $(WARNINGS)
 LDLIBS = -lm
 WARNINGS = -Wall -Wextra -Werror\
 -Wno-unused-function\
@@ -18,8 +18,8 @@ compile: shaders wayland
 
 shaders:
 	mkdir -p build
-	glslc src/shaders/basic.vert -o build/basic_vertex.spv
-	glslc src/shaders/basic.frag -o build/basic_fragment.spv
+	glslc -o build/basic.vert.spv src/shaders/basic.vert
+	glslc -o build/basic.frag.spv src/shaders/basic.frag
 
 wayland:
 	mkdir -p src/external
@@ -28,16 +28,25 @@ wayland:
 	eval wayland-scanner client-header < $(WL_PROTOCOLS)/unstable/xdg-decoration/xdg-decoration-unstable-v1.xml > src/external/xdg-decoration-unstable-v1-client-protocol.h
 	eval wayland-scanner private-code  < $(WL_PROTOCOLS)/unstable/xdg-decoration/xdg-decoration-unstable-v1.xml > src/external/xdg-decoration-unstable-v1-protocol.c
 
-	eval $(CC) -o build/vulkan_renderer src/main_wayland.c $(CFLAGS) $(LDLIBS) -lvulkan $(WL_CLIENT)
+	eval $(CC) -o build/vulkan_renderer_debug   src/main_wayland.c -DDEBUG=1 $(CFLAGS) $(LDLIBS) -lvulkan $(WL_CLIENT)
+	eval $(CC) -o build/vulkan_renderer_release src/main_wayland.c -DDEBUG=0 $(CFLAGS) $(LDLIBS) -lvulkan $(WL_CLIENT)
 
 xlib:
-	eval $(CC) -o build/vulkan_renderer src/main_xlib.c $(CFLAGS) $(LDLIBS) -lvulkan -lX11
+	eval $(CC) -o build/vulkan_renderer_debug   src/main_xlib.c -DDEBUG=1 $(CFLAGS) $(LDLIBS) -lvulkan -lX11
+	eval $(CC) -o build/vulkan_renderer_release src/main_xlib.c -DDEBUG=0 $(CFLAGS) $(LDLIBS) -lvulkan -lX11
 
 win32:
-	eval $(CC) -o build/vulkan_renderer src/main_win32.c $(CFLAGS) $(LDLIBS) -lvulkan-1 -lgdi32
+	eval $(CC) -o build/vulkan_renderer_debug   src/main_win32.c -DDEBUG=1 $(CFLAGS) $(LDLIBS) -lvulkan-1 -lgdi32
+	eval $(CC) -o build/vulkan_renderer_release src/main_win32.c -DDEBUG=0 $(CFLAGS) $(LDLIBS) -lvulkan-1 -lgdi32
 
 run:
-	cd build && ./vulkan_renderer
+	cd build && ./vulkan_renderer_release
 
 debug:
-	cd build && gdb vulkan_renderer
+	cd build && gdb vulkan_renderer_debug
+
+clean:
+	rm -f build/*.spv
+	rm -f build/*.exe
+	rm -f build/*_debug
+	rm -f build/*_release

@@ -1144,8 +1144,8 @@ static vulkan_pipeline Create_Basic_Vulkan_Graphics_Pipeline(vulkan_context *VK,
    vulkan_pipeline Result = {0};
 
    // NOTE: Initialize shaders.
-   string Vertex_Shader_Code = Read_Entire_File("basic_vertex.spv");
-   string Fragment_Shader_Code = Read_Entire_File("basic_fragment.spv");
+   string Vertex_Shader_Code = Read_Entire_File("basic.vert.spv");
+   string Fragment_Shader_Code = Read_Entire_File("basic.frag.spv");
 
    VkShaderModuleCreateInfo Vertex_Shader_Info = {0};
    Vertex_Shader_Info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
