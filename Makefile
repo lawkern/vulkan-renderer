@@ -18,26 +18,26 @@ compile: shaders wayland
 
 shaders:
 	mkdir -p build
-	glslc -o build/basic.vert.spv src/shaders/basic.vert
-	glslc -o build/basic.frag.spv src/shaders/basic.frag
+	glslc -o build/basic.vert.spv code/shaders/basic.vert
+	glslc -o build/basic.frag.spv code/shaders/basic.frag
 
 wayland:
-	mkdir -p src/external
-	eval wayland-scanner client-header < $(WL_PROTOCOLS)/stable/xdg-shell/xdg-shell.xml > src/external/xdg-shell-client-protocol.h
-	eval wayland-scanner private-code  < $(WL_PROTOCOLS)/stable/xdg-shell/xdg-shell.xml > src/external/xdg-shell-protocol.c
-	eval wayland-scanner client-header < $(WL_PROTOCOLS)/unstable/xdg-decoration/xdg-decoration-unstable-v1.xml > src/external/xdg-decoration-unstable-v1-client-protocol.h
-	eval wayland-scanner private-code  < $(WL_PROTOCOLS)/unstable/xdg-decoration/xdg-decoration-unstable-v1.xml > src/external/xdg-decoration-unstable-v1-protocol.c
+	mkdir -p code/external
+	eval wayland-scanner client-header < $(WL_PROTOCOLS)/stable/xdg-shell/xdg-shell.xml > code/external/xdg-shell-client-protocol.h
+	eval wayland-scanner private-code  < $(WL_PROTOCOLS)/stable/xdg-shell/xdg-shell.xml > code/external/xdg-shell-protocol.c
+	eval wayland-scanner client-header < $(WL_PROTOCOLS)/unstable/xdg-decoration/xdg-decoration-unstable-v1.xml > code/external/xdg-decoration-unstable-v1-client-protocol.h
+	eval wayland-scanner private-code  < $(WL_PROTOCOLS)/unstable/xdg-decoration/xdg-decoration-unstable-v1.xml > code/external/xdg-decoration-unstable-v1-protocol.c
 
-	eval $(CC) -o build/vulkan_renderer_debug   src/main_wayland.c -DDEBUG=1 $(CFLAGS) $(LDLIBS) -lvulkan $(WL_CLIENT)
-	eval $(CC) -o build/vulkan_renderer_release src/main_wayland.c -DDEBUG=0 $(CFLAGS) $(LDLIBS) -lvulkan $(WL_CLIENT)
+	eval $(CC) -o build/vulkan_renderer_debug   code/main_wayland.c -DDEBUG=1 $(CFLAGS) $(LDLIBS) -lvulkan $(WL_CLIENT)
+	eval $(CC) -o build/vulkan_renderer_release code/main_wayland.c -DDEBUG=0 $(CFLAGS) $(LDLIBS) -lvulkan $(WL_CLIENT)
 
 xlib:
-	eval $(CC) -o build/vulkan_renderer_debug   src/main_xlib.c -DDEBUG=1 $(CFLAGS) $(LDLIBS) -lvulkan -lX11
-	eval $(CC) -o build/vulkan_renderer_release src/main_xlib.c -DDEBUG=0 $(CFLAGS) $(LDLIBS) -lvulkan -lX11
+	eval $(CC) -o build/vulkan_renderer_debug   code/main_xlib.c -DDEBUG=1 $(CFLAGS) $(LDLIBS) -lvulkan -lX11
+	eval $(CC) -o build/vulkan_renderer_release code/main_xlib.c -DDEBUG=0 $(CFLAGS) $(LDLIBS) -lvulkan -lX11
 
 win32:
-	eval $(CC) -o build/vulkan_renderer_debug   src/main_win32.c -DDEBUG=1 $(CFLAGS) $(LDLIBS) -lvulkan-1 -lgdi32
-	eval $(CC) -o build/vulkan_renderer_release src/main_win32.c -DDEBUG=0 $(CFLAGS) $(LDLIBS) -lvulkan-1 -lgdi32
+	eval $(CC) -o build/vulkan_renderer_debug   code/main_win32.c -DDEBUG=1 $(CFLAGS) $(LDLIBS) -lvulkan-1 -lgdi32
+	eval $(CC) -o build/vulkan_renderer_release code/main_win32.c -DDEBUG=0 $(CFLAGS) $(LDLIBS) -lvulkan-1 -lgdi32
 
 run:
 	cd build && ./vulkan_renderer_release

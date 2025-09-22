@@ -1,4 +1,5 @@
 build
+misc
 *-protocol.h
 *-protocol.c
 vulkan_renderer_*
