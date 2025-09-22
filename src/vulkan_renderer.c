@@ -1,5 +1,7 @@
 /* (c) copyright 2025 Lawrence D. Kern /////////////////////////////////////// */
 
+#include "basic_string.c"
+#include "basic_math.c"
 #include "asset_parser.c"
 
 static bool Vulkan_Extensions_Supported(VkExtensionProperties *Extensions, u32 Extension_Count, const char **Requested_Names, u32 Requested_Count)
@@ -1343,7 +1345,7 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
    Make_Arena_Once(&VK->Scratch, Megabytes(256));
 
    // NOTE: Load assets that are needed at start up.
-   Parse_GLB(&VK->Debug_Scene, &VK->Permanent, VK->Scratch, "../data/monkey.glb");
+   Parse_GLB(&VK->Debug_Scene, &VK->Permanent, VK->Scratch, "../data/icosphere.glb");
 
    if(Create_Vulkan_Instance(&VK->Instance, VK->Scratch))
    {

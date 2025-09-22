@@ -18,9 +18,9 @@
 #endif
 
 typedef struct {
-   mat4 Model;
-   mat4 View;
-   mat4 Projection;
+   matrix4 Model;
+   matrix4 View;
+   matrix4 Projection;
 } basic_uniform;
 
 typedef struct {
