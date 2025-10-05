@@ -46,13 +46,15 @@ typedef struct {
 
 static gltf_accessor_type_info GLTF_Accessor_Type_Infos[GLTF_ACCESSOR_TYPE_COUNT] =
 {
-   [GLTF_ACCESSOR_TYPE_SCALAR] = {S("SCALAR"), 1},
-   [GLTF_ACCESSOR_TYPE_VEC2]   = {S("VEC2"),   2},
-   [GLTF_ACCESSOR_TYPE_VEC3]   = {S("VEC3"),   3},
-   [GLTF_ACCESSOR_TYPE_VEC4]   = {S("VEC4"),   4},
-   [GLTF_ACCESSOR_TYPE_MAT2]   = {S("MAT2"),   4},
-   [GLTF_ACCESSOR_TYPE_MAT3]   = {S("MAT3"),   9},
-   [GLTF_ACCESSOR_TYPE_MAT4]   = {S("MAT4"),  16},
+   // NOTE: MSVC doesn't like the compound literal used in the S() macro here,
+   // so we're hard-coding the string lengths.
+   [GLTF_ACCESSOR_TYPE_SCALAR] = {6, "SCALAR", 1},
+   [GLTF_ACCESSOR_TYPE_VEC2]   = {4, "VEC2",   2},
+   [GLTF_ACCESSOR_TYPE_VEC3]   = {4, "VEC3",   3},
+   [GLTF_ACCESSOR_TYPE_VEC4]   = {4, "VEC4",   4},
+   [GLTF_ACCESSOR_TYPE_MAT2]   = {4, "MAT2",   4},
+   [GLTF_ACCESSOR_TYPE_MAT3]   = {4, "MAT3",   9},
+   [GLTF_ACCESSOR_TYPE_MAT4]   = {4, "MAT4",  16},
 };
 
 typedef struct {

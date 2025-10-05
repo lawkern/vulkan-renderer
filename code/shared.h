@@ -9,7 +9,12 @@
 #define Minimum(A, B) ((A) < (B) ? (A) : (B))
 #define Maximum(A, B) ((A) > (B) ? (A) : (B))
 
-#define Assert(Cond) do { if(!(Cond)) { __builtin_trap(); } } while(0)
+#if _MSC_VER
+#  define Assert(Cond) do { if(!(Cond)) { __debugbreak(); } } while(0)
+#else
+#  define Assert(Cond) do { if(!(Cond)) { __builtin_trap(); } } while(0)
+#endif
+
 #define Invalid_Code_Path Assert(0)
 
 #define Kilobytes(N) (1024 * (N))

@@ -274,13 +274,6 @@ static float Compute_Win32_Frame_Time(win32_context *Win32)
       Frame_Seconds_Elapsed = ((float)(Win32->Frame_End.QuadPart - Win32->Frame_Start.QuadPart) / (float)Win32->Frequency.QuadPart);
    }
 
-#if DEBUG
-   if((Win32->Frame_Count++ % 60) == 0)
-   {
-      Log("Frame Time: %fms \r", Frame_Seconds_Elapsed * 1000.0f);
-   }
-#endif
-
    Win32->Frame_Start = Win32->Frame_End;
    Win32->Frame_Count++;
 
