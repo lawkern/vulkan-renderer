@@ -57,6 +57,8 @@ typedef struct {
    VkShaderModule Fragment_Shader;
 } vulkan_pipeline;
 
+#define MAX_SWAPCHAIN_IMAGE_COUNT 8
+
 typedef struct {
    VkSwapchainKHR Handle;
    VkExtent2D Extent;
@@ -66,11 +68,10 @@ typedef struct {
    vulkan_image Color_Image;
 
    u32 Image_Count;
-   u32 Max_Image_Count;
-   VkImage *Images;
-   VkImageView *Image_Views;
-   VkFramebuffer *Framebuffers;
-   VkSemaphore *Render_Finished_Semaphores;
+   VkImage Images[MAX_SWAPCHAIN_IMAGE_COUNT];
+   VkImageView Image_Views[MAX_SWAPCHAIN_IMAGE_COUNT];
+   VkFramebuffer Framebuffers[MAX_SWAPCHAIN_IMAGE_COUNT];
+   VkSemaphore Render_Finished_Semaphores[MAX_SWAPCHAIN_IMAGE_COUNT];
 } vulkan_swapchain;
 
 typedef struct {

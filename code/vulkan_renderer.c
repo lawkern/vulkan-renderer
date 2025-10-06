@@ -598,20 +598,18 @@ static void Create_Vulkan_Swapchain(vulkan_context *VK, vulkan_swapchain *Swapch
    VkSurfaceCapabilitiesKHR Surface_Capabilities;
    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(VK->Physical_Device.Handle, VK->Surface, &Surface_Capabilities);
 
-   VK->Swapchain.Image_Count = Surface_Capabilities.minImageCount + 1;
-   if(Surface_Capabilities.maxImageCount == 0)
+   // NOTE: A maxImageCount of zero indicates no upper limit so we'll just use a
+   // suitably big number.
+   u32 Max_Image_Count = Surface_Capabilities.maxImageCount;
+   if(Max_Image_Count == 0 || Max_Image_Count > MAX_SWAPCHAIN_IMAGE_COUNT)
    {
-      // NOTE: A maxImageCount of zero indicates no upper limit so we'll just
-      // use a suitably big number.
-      VK->Swapchain.Max_Image_Count = 16;
+      Max_Image_Count = MAX_SWAPCHAIN_IMAGE_COUNT;
    }
-   else
+
+   VK->Swapchain.Image_Count = Surface_Capabilities.minImageCount + 1;
+   if(VK->Swapchain.Image_Count > Max_Image_Count)
    {
-      if(Surface_Capabilities.maxImageCount < VK->Swapchain.Image_Count)
-      {
-         VK->Swapchain.Image_Count = Surface_Capabilities.maxImageCount;
-      }
-      VK->Swapchain.Max_Image_Count = Surface_Capabilities.maxImageCount;
+      VK->Swapchain.Image_Count = Max_Image_Count;
    }
 
    u32 Surface_Format_Count = 0;
@@ -714,41 +712,23 @@ static void Create_Vulkan_Swapchain(vulkan_context *VK, vulkan_swapchain *Swapch
 
    VC(vkCreateSwapchainKHR(VK->Device, &Swapchain_Info, 0, &VK->Swapchain.Handle));
 
-   vkGetSwapchainImagesKHR(VK->Device, VK->Swapchain.Handle, &VK->Swapchain.Image_Count, 0);
-   VK->Swapchain.Images = Allocate(&VK->Permanent, VkImage, VK->Swapchain.Image_Count);
-   vkGetSwapchainImagesKHR(VK->Device, VK->Swapchain.Handle, &VK->Swapchain.Image_Count, VK->Swapchain.Images);
+   u32 Image_Count = 0;
+   vkGetSwapchainImagesKHR(VK->Device, VK->Swapchain.Handle, &Image_Count, 0);
+   Assert(Image_Count >= VK->Swapchain.Image_Count);
 
-   VK->Swapchain.Image_Views = Allocate(&VK->Permanent, VkImageView, VK->Swapchain.Image_Count);
+   vkGetSwapchainImagesKHR(VK->Device, VK->Swapchain.Handle, &VK->Swapchain.Image_Count, VK->Swapchain.Images);
    for(u32 Image_Index = 0; Image_Index < VK->Swapchain.Image_Count; ++Image_Index)
    {
       VK->Swapchain.Image_Views[Image_Index] = Create_Vulkan_Image_View(VK, VK->Swapchain.Images[Image_Index], VK->Swapchain.Image_Format, VK_IMAGE_ASPECT_COLOR_BIT);
-   }
 
-   if(!VK->Swapchain.Render_Finished_Semaphores)
-   {
-      VK->Swapchain.Render_Finished_Semaphores = Allocate(&VK->Permanent, VkSemaphore, VK->Swapchain.Max_Image_Count);
-   }
-   for(u32 Image_Index = 0; Image_Index < VK->Swapchain.Image_Count; ++Image_Index)
-   {
       VkSemaphoreCreateInfo Semaphore_Info = {0};
       Semaphore_Info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
       VC(vkCreateSemaphore(VK->Device, &Semaphore_Info, 0, VK->Swapchain.Render_Finished_Semaphores + Image_Index));
    }
 }
 
-static void Create_Vulkan_Swapchain_Framebuffers(vulkan_context *VK, vulkan_swapchain *Swapchain, VkRenderPass Render_Pass, arena *Arena)
+static void Create_Vulkan_Swapchain_Framebuffers(vulkan_context *VK, vulkan_swapchain *Swapchain, VkRenderPass Render_Pass)
 {
-   // NOTE: Allocate framebuffers based on the maximum number of swapchain
-   // images supported by the surface so we don't need to free anything on
-   // swapchain recreation. This assumes (1) the framebuffer array is
-   // zero-initialized the first time through and (2) the underlying arena has
-   // the same lifetime as the surface. In practice this probably doesn't
-   // matter, and we'll always have 2 or 3 images.
-   if(Arena)
-   {
-      Swapchain->Framebuffers = Allocate(Arena, VkFramebuffer, Swapchain->Max_Image_Count);
-   }
-
    for(u32 Image_Index = 0; Image_Index < Swapchain->Image_Count; ++Image_Index)
    {
       VkImageView Attachments[] =
@@ -789,7 +769,7 @@ static void Recreate_Vulkan_Swapchain(vulkan_context *VK, vulkan_swapchain *Swap
    vkDeviceWaitIdle(VK->Device);
    Destroy_Vulkan_Swapchain(VK, Swapchain);
    Create_Vulkan_Swapchain(VK, Swapchain);
-   Create_Vulkan_Swapchain_Framebuffers(VK, &VK->Swapchain, VK->Basic_Render_Pass, 0);
+   Create_Vulkan_Swapchain_Framebuffers(VK, &VK->Swapchain, VK->Basic_Render_Pass);
 }
 
 static vulkan_buffer Create_Vulkan_Buffer(vulkan_context *VK, size Size, VkBufferUsageFlags Usage, VkMemoryPropertyFlags Properties)
@@ -1417,7 +1397,7 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
 
             // NOTE: Create the swapchain's framebuffers independently of the
             // swapchain so a render pass is available.
-            Create_Vulkan_Swapchain_Framebuffers(VK, &VK->Swapchain, VK->Basic_Render_Pass, &VK->Permanent);
+            Create_Vulkan_Swapchain_Framebuffers(VK, &VK->Swapchain, VK->Basic_Render_Pass);
 
             // NOTE: Configure frame synchronization.
             for(int Frame_Index = 0; Frame_Index < MAX_FRAMES_IN_FLIGHT; ++Frame_Index)
