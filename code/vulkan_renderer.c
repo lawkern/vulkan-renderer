@@ -772,7 +772,7 @@ static void Recreate_Vulkan_Swapchain(vulkan_context *VK, vulkan_swapchain *Swap
    Create_Vulkan_Swapchain_Framebuffers(VK, &VK->Swapchain, VK->Basic_Render_Pass);
 }
 
-static vulkan_buffer Create_Vulkan_Buffer(vulkan_context *VK, size Size, VkBufferUsageFlags Usage, VkMemoryPropertyFlags Properties)
+static vulkan_buffer Create_Vulkan_Buffer(vulkan_context *VK, idx Size, VkBufferUsageFlags Usage, VkMemoryPropertyFlags Properties)
 {
    vulkan_buffer Result = {0};
    Result.Size = Size;
@@ -805,7 +805,7 @@ static vulkan_buffer Create_Vulkan_Vertex_Buffer(vulkan_context *VK, gltf_scene 
    gltf_buffer_view Buffer_View = Scene->Buffer_Views[Accessor.Buffer_View];
 
    u8 *Source_Memory = Scene->Binary_Data + Buffer_View.Offset + Accessor.Offset;
-   size Size = Accessor.Count * Get_GLTF_Type_Size(Accessor.Type, Accessor.Component_Type);
+   idx Size = Accessor.Count * Get_GLTF_Type_Size(Accessor.Type, Accessor.Component_Type);
 
    VkBufferUsageFlags Staging_Usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
    VkMemoryPropertyFlags Staging_Properties = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
@@ -828,9 +828,9 @@ static vulkan_buffer Create_Vulkan_Vertex_Buffer(vulkan_context *VK, gltf_scene 
    return(Result);
 }
 
-static inline size Get_Vulkan_Index_Size(VkIndexType Index_Type)
+static inline idx Get_Vulkan_Index_Size(VkIndexType Index_Type)
 {
-   size Result = 0;
+   idx Result = 0;
    switch(Index_Type)
    {
       case VK_INDEX_TYPE_UINT8_EXT: { Result = 1; } break;
@@ -847,7 +847,7 @@ static vulkan_buffer Create_Vulkan_Index_Buffer(vulkan_context *VK, gltf_scene *
    gltf_buffer_view Buffer_View = Scene->Buffer_Views[Accessor.Buffer_View];
 
    u8 *Source_Memory = Scene->Binary_Data + Buffer_View.Offset + Accessor.Offset;
-   size Size = Accessor.Count * Get_GLTF_Type_Size(Accessor.Type, Accessor.Component_Type);
+   idx Size = Accessor.Count * Get_GLTF_Type_Size(Accessor.Type, Accessor.Component_Type);
 
    VkBufferUsageFlags Staging_Buffer_Usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
    VkMemoryPropertyFlags Staging_Buffer_Properties = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
@@ -898,9 +898,9 @@ static void Copy_Vulkan_Buffer_To_Image(vulkan_context *VK, VkBuffer Buffer, VkI
    End_Onetime_Vulkan_Commands(VK, Command_Buffer);
 }
 
-static size Get_Vulkan_Format_Size(VkFormat Format)
+static idx Get_Vulkan_Format_Size(VkFormat Format)
 {
-   size Result = 0;
+   idx Result = 0;
 
    switch(Format)
    {
@@ -916,7 +916,7 @@ static size Get_Vulkan_Format_Size(VkFormat Format)
 
 static vulkan_image Create_Vulkan_Texture_Image(vulkan_context *VK, void *Memory, int Width, int Height, VkFormat Format)
 {
-   size Size = Width * Height * Get_Vulkan_Format_Size(Format);
+   idx Size = Width * Height * Get_Vulkan_Format_Size(Format);
 
    VkBufferUsageFlags Staging_Usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
    VkMemoryPropertyFlags Staging_Properties = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
@@ -1370,7 +1370,7 @@ static INITIALIZE_VULKAN(Initialize_Vulkan)
             VK->Vertex_Indices = Create_Vulkan_Index_Buffer(VK, &VK->Debug_Scene, Debug_Primitive.Indices);
             for(int Frame_Index = 0; Frame_Index < MAX_FRAMES_IN_FLIGHT; ++Frame_Index)
             {
-               size Size = sizeof(basic_uniform);
+               idx Size = sizeof(basic_uniform);
                VkBufferUsageFlags Usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
                VkMemoryPropertyFlags Properties = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
 
@@ -1513,7 +1513,7 @@ static RENDER_WITH_VULKAN(Render_With_Vulkan)
 
          vkCmdBindDescriptorSets(Command_Buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, Basic->Layout, 0, 1, &Frame->Descriptor_Set, 0, 0);
 
-         size Index_Count = VK->Vertex_Indices.Size / Get_Vulkan_Index_Size(VK->Vertex_Indices.Index_Type);
+         idx Index_Count = VK->Vertex_Indices.Size / Get_Vulkan_Index_Size(VK->Vertex_Indices.Index_Type);
          vkCmdDrawIndexed(Command_Buffer, Index_Count, 1, 0, 0, 0);
       }
       vkCmdEndRenderPass(Command_Buffer);

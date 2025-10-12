@@ -103,14 +103,14 @@ typedef struct {
    int Buffer_Count;
    gltf_buffer *Buffers;
 
-   size Binary_Size;
+   idx Binary_Size;
    u8 *Binary_Data;
 } gltf_scene;
 
-static inline size
+static inline idx
 Get_GLTF_Type_Size(gltf_accessor_type Type, gltf_component_type Component_Type)
 {
-   size Result = 0;
+   idx Result = 0;
 
    int Component_Count = GLTF_Accessor_Type_Infos[Type].Component_Count;
    switch(Component_Type)

@@ -24,7 +24,7 @@ static bool Strings_Are_Equal(string A, string B)
    return(Result);
 }
 
-static inline string Copy_String(arena *Arena, u8 *Source, size Length)
+static inline string Copy_String(arena *Arena, u8 *Source, idx Length)
 {
    string Result = {0};
    Result.Length = Length;

@@ -3,7 +3,7 @@
 #define S(Literal) (string){sizeof(Literal)-1, (u8 *)Literal}
 
 typedef struct {
-   size Length;
+   idx Length;
    u8 *Data;
 } string;
 

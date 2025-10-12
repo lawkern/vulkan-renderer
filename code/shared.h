@@ -5,7 +5,7 @@
 #define DEFAULT_RESOLUTION_WIDTH 640
 #define DEFAULT_RESOLUTION_HEIGHT 480
 
-#define Array_Count(Array) (size)(sizeof(Array) / sizeof((Array)[0]))
+#define Array_Count(Array) (idx)(sizeof(Array) / sizeof((Array)[0]))
 #define Minimum(A, B) ((A) < (B) ? (A) : (B))
 #define Maximum(A, B) ((A) > (B) ? (A) : (B))
 
@@ -32,7 +32,7 @@ typedef uint32_t u32;
 typedef uint64_t u64;
 
 #include <stddef.h>
-typedef ptrdiff_t size;
+typedef ptrdiff_t idx;
 
 #include <stdbool.h>
 #include <stdlib.h>
@@ -42,24 +42,24 @@ typedef ptrdiff_t size;
 #include "basic_math.h"
 #include "debug_data.c"
 
-static inline void Copy_Memory(void *Destination, void *Source, size Size)
+static inline void Copy_Memory(void *Destination, void *Source, idx Size)
 {
    memcpy(Destination, Source, Size);
 }
 
 #define Zero_Struct(Struct) Zero_Memory((Struct), sizeof(*(Struct)))
-static inline void Zero_Memory(void *Destination, size Size)
+static inline void Zero_Memory(void *Destination, idx Size)
 {
    memset(Destination, 0, Size);
 }
 
 typedef struct {
    u8 *Base;
-   size Size;
-   size Used;
+   idx Size;
+   idx Used;
 } arena;
 
-static inline void Make_Arena(arena *Arena, size Size)
+static inline void Make_Arena(arena *Arena, idx Size)
 {
    Arena->Base = calloc(1, Size);
    Arena->Size = Size;
@@ -73,7 +73,7 @@ static inline void Reset_Arena(arena *Arena)
    Arena->Used = 0;
 }
 
-static inline void Make_Arena_Once(arena *Arena, size Size)
+static inline void Make_Arena_Once(arena *Arena, idx Size)
 {
    // NOTE: Assumes new arenas were previously zero-initialized.
    if(Arena->Size == 0)
@@ -88,7 +88,7 @@ static inline void Make_Arena_Once(arena *Arena, size Size)
 
 // TODO: Alignment!
 #define Allocate(Arena, type, Count) (type *)Allocate_Size((Arena), sizeof(type)*(Count))
-static inline void *Allocate_Size(arena *Arena, size Size)
+static inline void *Allocate_Size(arena *Arena, idx Size)
 {
    Assert(Arena->Used <= (Arena->Size - Size));
 

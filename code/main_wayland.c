@@ -40,7 +40,7 @@ typedef struct {
    struct wl_shm_pool *Pool;
    struct wl_buffer *Buffers[SHM_BUFFER_COUNT];
    struct wl_shm *Shared_Memory;
-   size Shared_Memory_Size;
+   idx Shared_Memory_Size;
    int Shared_Memory_File;
    int Buffer_Index;
    u32 *Buffer_Pixels;
@@ -94,7 +94,7 @@ static inline void Toggle_Wayland_Fullscreen(wayland_context *Wayland)
    Fullscreen = !Fullscreen;
 }
 
-static int Create_Wayland_Shared_Memory_File(size Size)
+static int Create_Wayland_Shared_Memory_File(idx Size)
 {
    char Template[] = "/tmp/wayland-XXXXXX";
 
@@ -167,7 +167,7 @@ static void Create_Wayland_Pixel_Buffers(wayland_context *Wayland, int Width, in
    Wayland->Pool = wl_shm_create_pool(Wayland->Shared_Memory, Wayland->Shared_Memory_File, Wayland->Shared_Memory_Size);
    for(int Buffer_Index = 0; Buffer_Index < SHM_BUFFER_COUNT; ++Buffer_Index)
    {
-      size Offset = Stride * Height * Buffer_Index;
+      idx Offset = Stride * Height * Buffer_Index;
       Wayland->Buffers[Buffer_Index] = wl_shm_pool_create_buffer(Wayland->Pool, Offset, Width, Height, Stride, WL_SHM_FORMAT_XRGB8888);
 
       wl_surface_attach(Wayland->Surface, Wayland->Buffers[Buffer_Index], 0, 0);

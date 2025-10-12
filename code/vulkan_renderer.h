@@ -28,7 +28,7 @@ typedef struct {
    VkDeviceMemory Device_Memory;
    void *Mapped_Memory_Address;
 
-   size Size;
+   idx Size;
    VkIndexType Index_Type;
 } vulkan_buffer;
 

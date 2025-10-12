@@ -41,7 +41,7 @@ static READ_ENTIRE_FILE(Read_Entire_File)
       }
       else
       {
-         size Total_Size = File_Information.st_size;
+         idx Total_Size = File_Information.st_size;
 
          // NOTE: Add an extra byte to the allocation for a null terminator.
          u8 *Data = mmap(0, Total_Size+1, PROT_READ|PROT_WRITE, MAP_ANONYMOUS|MAP_PRIVATE, -1, 0);
@@ -51,10 +51,10 @@ static READ_ENTIRE_FILE(Read_Entire_File)
          }
          else
          {
-            size Length = 0;
+            idx Length = 0;
             while(Length < Total_Size)
             {
-               size Single_Read = read(File, Data+Length, Total_Size-Length);
+               idx Single_Read = read(File, Data+Length, Total_Size-Length);
                if(Single_Read == 0)
                {
                   break; // NOTE: Done.
